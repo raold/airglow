@@ -121,7 +121,8 @@ public sealed class LhmBackend : IHardwareBackend
         public int? Rpm { get; private set; }
 
         public void SetPercent(int percent) =>
-            control.Control!.SetSoftware(Math.Clamp(percent, 0, 100));
+            control.Control!.SetSoftware(
+                LhmSensorMap.ClampToControl(percent, control.Control!.MinSoftwareValue, control.Control!.MaxSoftwareValue));
 
         public void SetAuto() => control.Control!.SetDefault();
 

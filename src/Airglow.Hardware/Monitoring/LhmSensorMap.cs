@@ -17,6 +17,9 @@ public static class LhmSensorMap
     public static string IdFor(ISensor sensor) =>
         WellKnownId(sensor.Hardware.HardwareType, sensor.SensorType, sensor.Name) ?? "lhm" + sensor.Identifier;
 
+    public static float ClampToControl(int percent, float min, float max) =>
+        Math.Clamp((float)percent, min, max);
+
     public static int? GpuFanNumber(string name)
     {
         const string prefix = "GPU Fan";

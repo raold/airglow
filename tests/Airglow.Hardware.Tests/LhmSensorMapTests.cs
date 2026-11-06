@@ -25,4 +25,13 @@ public class LhmSensorMapTests
     {
         Assert.Equal(expected, LhmSensorMap.GpuFanNumber(name));
     }
+
+    [Theory]
+    [InlineData(10, 30f, 100f, 30f)]
+    [InlineData(55, 30f, 100f, 55f)]
+    [InlineData(120, 30f, 100f, 100f)]
+    public void ClampToControl_limits_to_control_range(int percent, float min, float max, float expected)
+    {
+        Assert.Equal(expected, LhmSensorMap.ClampToControl(percent, min, max));
+    }
 }
