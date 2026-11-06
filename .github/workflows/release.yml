@@ -1,0 +1,71 @@
+# Builds the unsigned MSI for a v* tag and attaches it to a GitHub Release.
+#
+# Optional signing: the signing step runs only when AZURE_TRUSTED_SIGNING_ENDPOINT is set.
+# Repository secrets it reads:
+#   AZURE_TRUSTED_SIGNING_ENDPOINT   Trusted Signing endpoint URL
+#   AZURE_TRUSTED_SIGNING_ACCOUNT    Trusted Signing account name
+#   AZURE_TRUSTED_SIGNING_PROFILE    certificate profile name
+#   AZURE_TENANT_ID                  Entra tenant id
+#   AZURE_CLIENT_ID                  service principal client id
+#   AZURE_CLIENT_SECRET              service principal client secret
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test Airglow.slnx -c Release
+
+  msi:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Work out the version from the tag
+        shell: pwsh
+        run: |
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag '${{ github.ref_name }}' is not vX.Y.Z." }
+          "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build the MSI
+        shell: pwsh
+        run: scripts/build-msi.ps1 -Version $env:VERSION
+
+      - name: Sign the MSI
+        if: env.SIGNING_ENDPOINT != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Create the GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "artifacts/airglow-$env:VERSION-x64.msi" --title "airglow $env:VERSION" --generate-notes
