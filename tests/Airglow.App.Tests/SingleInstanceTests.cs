@@ -20,4 +20,12 @@ public sealed class SingleInstanceTests
 
         Assert.True(raised.Wait(TimeSpan.FromSeconds(2)));
     }
+
+    [Fact]
+    public void Only_a_launch_without_tray_shows_the_window()
+    {
+        Assert.True(App.ShowsWindow([]));
+        Assert.True(App.ShowsWindow(["--other"]));
+        Assert.False(App.ShowsWindow(["--tray"]));
+    }
 }

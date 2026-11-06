@@ -14,10 +14,12 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
 
+        var showWindow = ShowsWindow(e.Args);
         _instance = new SingleInstance("airglow-app");
         if (!_instance.IsFirst)
         {
-            _instance.SignalFirst();
+            if (showWindow)
+                _instance.SignalFirst();
             Shutdown();
             return;
         }
@@ -35,9 +37,12 @@ public partial class App : System.Windows.Application
         _window = new MainWindow(_services);
         _tray = new TrayIcon(_services.GetRequiredService<LiveState>(), ShowWindow, Quit);
 
-        if (!e.Args.Contains("--tray"))
+        if (showWindow)
             ShowWindow();
     }
+
+    // Sign-in and the restart after an upgrade launch with --tray; only a launch without it brings the window up.
+    internal static bool ShowsWindow(IReadOnlyCollection<string> args) => !args.Contains("--tray");
 
     protected override void OnExit(ExitEventArgs e)
     {
