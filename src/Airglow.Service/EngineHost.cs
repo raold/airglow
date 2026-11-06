@@ -7,6 +7,8 @@ namespace Airglow.Service;
 public sealed record WatchdogOptions(TimeSpan HangAfter, TimeSpan CheckEvery, Action<string> FailFast)
 {
     public static WatchdogOptions Default { get; } = new(TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(5), Environment.FailFast);
+
+    public TimeSpan FirstTickLimit { get; init; } = TimeSpan.FromSeconds(60);
 }
 
 public sealed class EngineHost(
@@ -28,6 +30,8 @@ public sealed class EngineHost(
     private long _failingSince;
     private bool _handedBack;
     private long _lastTick = NoTick;
+    private long _watchStart;
+    private long _lastCheck;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -134,24 +138,51 @@ public sealed class EngineHost(
     {
         try
         {
+            StartWatchdogClock();
             using var timer = new PeriodicTimer(_watchdog.CheckEvery, time);
             while (await timer.WaitForNextTickAsync(token))
             {
-                var last = Interlocked.Read(ref _lastTick);
-                if (last == NoTick)
-                    continue;
-                var idle = time.GetElapsedTime(last);
-                if (idle < _watchdog.HangAfter)
-                    continue;
-
-                log.LogCritical("No engine tick has completed for {Seconds:0.#} s; failing fast so the service restarts", idle.TotalSeconds);
-                _watchdog.FailFast("airglow engine tick hung");
-                return;
+                if (CheckWatchdog())
+                    return;
             }
         }
         catch (OperationCanceledException)
         {
         }
+    }
+
+    internal void StartWatchdogClock()
+    {
+        var now = time.GetTimestamp();
+        _watchStart = now;
+        _lastCheck = now;
+    }
+
+    // The monotonic clock keeps counting through sleep and hibernate, so a gap since the previous check means this
+    // process was suspended, not that a tick hung: re-arm instead of firing and give the overdue tick a fresh window.
+    internal bool CheckWatchdog()
+    {
+        var now = time.GetTimestamp();
+        var sinceCheck = time.GetElapsedTime(_lastCheck, now);
+        _lastCheck = now;
+
+        var last = Interlocked.Read(ref _lastTick);
+        if (sinceCheck > _watchdog.CheckEvery * 2)
+        {
+            _watchStart = now;
+            if (last != NoTick)
+                Interlocked.CompareExchange(ref _lastTick, now, last);
+            return false;
+        }
+
+        var idle = time.GetElapsedTime(last == NoTick ? _watchStart : last, now);
+        var limit = last == NoTick ? _watchdog.FirstTickLimit : _watchdog.HangAfter;
+        if (idle < limit)
+            return false;
+
+        log.LogCritical("No engine tick has completed for {Seconds:0.#} s; failing fast so the service restarts", idle.TotalSeconds);
+        _watchdog.FailFast("airglow engine tick hung");
+        return true;
     }
 
     private EngineState WithConfigProblem(EngineState state, string? tickFault)

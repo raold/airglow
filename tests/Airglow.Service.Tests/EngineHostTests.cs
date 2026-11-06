@@ -134,4 +134,74 @@ public sealed class EngineHostTests : IDisposable
         Assert.Equal(2, _log.Entries.Count(e => e is { Level: LogLevel.Error, Message: "Engine tick failed" }));
         Assert.Single(_log.Entries, e => e.Message == "Engine tick recovered after 5 failures");
     }
+
+    private EngineHost NewHost(List<string> failFast, bool tick)
+    {
+        var options = new WatchdogOptions(TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(5), failFast.Add);
+        var host = new EngineHost(_engine, new ConfigStore(Path.Combine(_directory, "config.json")), new ConfigHolder(), _cache, _time, _log, options);
+        host.StartWatchdogClock();
+        if (tick)
+            host.RunTick();
+        return host;
+    }
+
+    [Fact]
+    public void Watchdog_rearms_after_its_own_suspension()
+    {
+        var failFast = new List<string>();
+        var host = NewHost(failFast, tick: true);
+        _time.Advance(TimeSpan.FromSeconds(5));
+        Assert.False(host.CheckWatchdog());
+
+        _time.Advance(TimeSpan.FromSeconds(120));
+        Assert.False(host.CheckWatchdog());
+
+        for (var second = 5; second < 15; second += 5)
+        {
+            _time.Advance(TimeSpan.FromSeconds(5));
+            Assert.False(host.CheckWatchdog());
+        }
+
+        _time.Advance(TimeSpan.FromSeconds(5));
+        Assert.True(host.CheckWatchdog());
+        Assert.Single(failFast);
+    }
+
+    [Fact]
+    public void Watchdog_watches_the_first_tick()
+    {
+        var failFast = new List<string>();
+        var host = NewHost(failFast, tick: false);
+        for (var second = 5; second < 60; second += 5)
+        {
+            _time.Advance(TimeSpan.FromSeconds(5));
+            Assert.False(host.CheckWatchdog());
+        }
+
+        _time.Advance(TimeSpan.FromSeconds(5));
+        Assert.True(host.CheckWatchdog());
+        Assert.Single(failFast);
+    }
+
+    [Fact]
+    public void Watchdog_accepts_a_first_tick_that_completes_in_time()
+    {
+        var failFast = new List<string>();
+        var host = NewHost(failFast, tick: false);
+        for (var second = 5; second <= 30; second += 5)
+        {
+            _time.Advance(TimeSpan.FromSeconds(5));
+            Assert.False(host.CheckWatchdog());
+        }
+
+        host.RunTick();
+        for (var second = 5; second <= 60; second += 5)
+        {
+            _time.Advance(TimeSpan.FromSeconds(5));
+            host.RunTick();
+            Assert.False(host.CheckWatchdog());
+        }
+
+        Assert.Empty(failFast);
+    }
 }
