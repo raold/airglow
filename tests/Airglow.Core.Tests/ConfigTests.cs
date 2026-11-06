@@ -143,4 +143,29 @@ public sealed class ConfigTests : IDisposable
         Assert.Throws<ArgumentException>(() =>
             store.Save(AppConfig.CreateDefault() with { Engine = new EngineSettings(TickMilliseconds: 1) }));
     }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"version\":1,\"curves\":null}")]
+    public void Load_incomplete_file_falls_back(string json)
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "config.json");
+        File.WriteAllText(path, json);
+        var result = new ConfigStore(path).Load();
+        Assert.StartsWith("config.json was invalid:", result.Problem);
+        Assert.Equal(AppConfig.CreateDefault().Fans.Count, result.Config.Fans.Count);
+    }
+
+    [Fact]
+    public void Rejects_bad_and_duplicate_lian_li_group_index()
+    {
+        var c = AppConfig.CreateDefault();
+        var errors = ConfigValidator.Validate(c with
+        {
+            LianLiGroups = [new LianLiGroup(4, "A", 3), new LianLiGroup(1, "B", 3), new LianLiGroup(1, "C", 3)]
+        });
+        Assert.Contains("Lian Li group 4: Index must be 0-3", errors);
+        Assert.Contains("Duplicate Lian Li group index 1", errors);
+    }
 }

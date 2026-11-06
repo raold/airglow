@@ -8,6 +8,17 @@ public static class ConfigValidator
     {
         var errors = new List<string>();
 
+        if (config.Engine is null)
+            errors.Add("Engine: missing");
+        if (config.Curves is null)
+            errors.Add("Curves: missing");
+        if (config.Fans is null)
+            errors.Add("Fans: missing");
+        if (config.LianLiGroups is null)
+            errors.Add("LianLiGroups: missing");
+        if (config.Engine is null || config.Curves is null || config.Fans is null || config.LianLiGroups is null)
+            return errors;
+
         if (config.Engine.TickMilliseconds is < 250 or > 5000)
             errors.Add("Engine: TickMilliseconds must be 250-5000");
         if (config.Engine.FailsafePercent is < 0 or > 100)
@@ -20,11 +31,16 @@ public static class ConfigValidator
         var byId = new Dictionary<string, FanCurve>();
         foreach (var curve in config.Curves)
         {
+            if (curve is null)
+            {
+                errors.Add("Curves: null entry");
+                continue;
+            }
             if (!byId.TryAdd(curve.Id, curve))
                 errors.Add($"Duplicate curve id '{curve.Id}'");
         }
 
-        foreach (var curve in config.Curves)
+        foreach (var curve in config.Curves.Where(c => c is not null))
         {
             switch (curve)
             {
@@ -36,8 +52,13 @@ public static class ConfigValidator
                         errors.Add($"Curve '{f.Id}': percent must be 0-100");
                     break;
                 case MixCurve m:
+                    if (m.CurveIds is null)
+                    {
+                        errors.Add($"Curve '{m.Id}': missing curves");
+                        break;
+                    }
                     foreach (var member in m.CurveIds)
-                        if (!byId.ContainsKey(member))
+                        if (member is null || !byId.ContainsKey(member))
                             errors.Add($"Curve '{m.Id}': unknown curve '{member}' in mix");
                     if (ReachesItself(m, byId))
                         errors.Add($"Curve '{m.Id}': mix cycle");
@@ -48,6 +69,11 @@ public static class ConfigValidator
         var fanIds = new HashSet<string>();
         foreach (var fan in config.Fans)
         {
+            if (fan is null)
+            {
+                errors.Add("Fans: null entry");
+                continue;
+            }
             var id = fan.FanId;
             if (!fanIds.Add(id))
                 errors.Add($"Duplicate fan id '{id}'");
@@ -66,9 +92,21 @@ public static class ConfigValidator
                 Range(errors, id, nameof(fan.ManualPercent), manual, 0, 100);
         }
 
+        var groupIndexes = new HashSet<int>();
         foreach (var group in config.LianLiGroups)
+        {
+            if (group is null)
+            {
+                errors.Add("LianLiGroups: null entry");
+                continue;
+            }
+            if (group.Index is < 0 or > 3)
+                errors.Add($"Lian Li group {group.Index}: Index must be 0-3");
+            if (!groupIndexes.Add(group.Index))
+                errors.Add($"Duplicate Lian Li group index {group.Index}");
             if (group.FanCount is < 0 or > 4)
                 errors.Add($"Lian Li group {group.Index}: FanCount must be 0-4");
+        }
 
         return errors;
     }
@@ -81,6 +119,13 @@ public static class ConfigValidator
 
     private static void ValidateGraph(GraphCurve g, List<string> errors)
     {
+        if (g.Points is null)
+        {
+            errors.Add($"Curve '{g.Id}': missing points");
+            return;
+        }
+        if (g.Hysteresis is null)
+            errors.Add($"Curve '{g.Id}': missing hysteresis");
         if (g.Points.Count < 2)
         {
             errors.Add($"Curve '{g.Id}': needs at least 2 points");
@@ -107,7 +152,7 @@ public static class ConfigValidator
             var id = stack.Pop();
             if (id == start.Id) return true;
             if (!seen.Add(id)) continue;
-            if (byId.TryGetValue(id, out var c) && c is MixCurve m)
+            if (id is not null && byId.TryGetValue(id, out var c) && c is MixCurve { CurveIds: not null } m)
                 foreach (var next in m.CurveIds) stack.Push(next);
         }
         return false;
