@@ -142,13 +142,15 @@ public class LianLiAlHubTests
     }
 
     [Fact]
-    public void Firmware_query_retries_then_gives_up()
+    public void Firmware_query_is_tried_once_without_waiting()
     {
         var device = new FakeHidDevice();
-        var hub = new LianLiAlHub(device, Groups(3), _ => { });
+        var sleeps = new List<TimeSpan>();
+        var hub = new LianLiAlHub(device, Groups(3), sleeps.Add);
 
         Assert.Null(hub.Firmware);
-        Assert.Equal(3, device.Sent.Count);
+        Assert.Single(device.Sent);
+        Assert.All(sleeps, s => Assert.True(s < TimeSpan.FromSeconds(1)));
     }
 
     [Fact]

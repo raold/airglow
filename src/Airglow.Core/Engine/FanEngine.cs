@@ -15,8 +15,13 @@ public sealed class FanEngine(
     public const int ResendSeconds = 10;
     public const int RetrySeconds = 5;
 
+    public const int SensorMissingSeconds = 30;
+    public const int SensorReopenSeconds = 60;
+
     private static readonly TimeSpan Resend = TimeSpan.FromSeconds(ResendSeconds);
     private static readonly TimeSpan Retry = TimeSpan.FromSeconds(RetrySeconds);
+    private static readonly TimeSpan SensorMissing = TimeSpan.FromSeconds(SensorMissingSeconds);
+    private static readonly TimeSpan SensorReopen = TimeSpan.FromSeconds(SensorReopenSeconds);
 
     private readonly object _lock = new();
     private readonly List<Slot> _slots = factories.Select(f => new Slot(f)).ToList();
@@ -24,6 +29,8 @@ public sealed class FanEngine(
     private readonly Dictionary<string, int> _manual = [];
     private readonly Dictionary<string, long> _inputSeen = [];
     private readonly HashSet<string> _loggedFaults = [];
+    private readonly Dictionary<string, long> _sensorSeen = [];
+    private long? _lastSensorReopen;
     private IReadOnlyDictionary<string, CurveResult> _lastResults = new Dictionary<string, CurveResult>();
     private Dictionary<string, FanOutputShaper> _shapers = [];
     private AppConfig? _config;
@@ -60,6 +67,8 @@ public sealed class FanEngine(
                 _manual.Remove(id);
             if (_config is null)
                 _firstApplied = time.GetTimestamp();
+            foreach (var sensor in CurveSensors(config))
+                _sensorSeen.TryAdd(sensor, time.GetTimestamp());
             var groupsChanged = _config is { } previous && !previous.LianLiGroups.SequenceEqual(config.LianLiGroups);
             _curves = curves;
             _shapers = shapers;
@@ -185,7 +194,9 @@ public sealed class FanEngine(
                 _loggedFaults.Remove(cleared);
             }
 
-            return Snapshot(temperatures, plans, faults);
+            var state = Snapshot(temperatures, plans, faults);
+            ReopenIfSensorsMissing(config, temperatures, now);
+            return state;
         }
     }
 
@@ -393,6 +404,35 @@ public sealed class FanEngine(
 
         var faults = _slots.Select(s => s.Fault).OfType<string>().Concat(engineFaults).ToList();
         return new EngineState(time.GetUtcNow(), temps, fans, faults);
+    }
+
+    private static IEnumerable<string> CurveSensors(AppConfig config) =>
+        config.Curves.OfType<GraphCurve>().Select(g => g.SensorId).Where(id => !string.IsNullOrEmpty(id)).Distinct();
+
+    // A sensor driver that wasn't ready when the backend opened (cold boot) only shows up after a reopen.
+    private void ReopenIfSensorsMissing(AppConfig config, Dictionary<string, double> temperatures, long now)
+    {
+        string? missing = null;
+        foreach (var sensor in CurveSensors(config))
+        {
+            if (temperatures.TryGetValue(sensor, out var celsius) && !double.IsNaN(celsius))
+                _sensorSeen[sensor] = now;
+            else if (time.GetElapsedTime(_sensorSeen.GetValueOrDefault(sensor, now), now) > SensorMissing)
+                missing ??= sensor;
+        }
+        if (missing is null || (_lastSensorReopen is { } last && time.GetElapsedTime(last, now) < SensorReopen))
+            return;
+
+        var suppliers = Live.Where(s => s.Sensors.Count > 0).ToList();
+        if (suppliers.Count == 0)
+            return;
+        _lastSensorReopen = now;
+        foreach (var slot in suppliers)
+        {
+            log.LogWarning("Sensor {Sensor} has been missing for over {Seconds} s; reopening {Backend}",
+                missing, SensorMissingSeconds, slot.Factory.Name);
+            Drop(slot);
+        }
     }
 
     private List<SensorInfo> LiveSensors() => Live.SelectMany(s => s.Sensors).DistinctBy(s => s.Id).ToList();

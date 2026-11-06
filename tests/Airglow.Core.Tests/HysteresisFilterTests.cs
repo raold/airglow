@@ -69,6 +69,33 @@ public class HysteresisFilterTests
         Assert.Equal(29.5, low.Apply(29.5, 30, 80));
     }
 
+    private sealed class SteppedClock : TimeProvider
+    {
+        public DateTimeOffset Wall { get; set; } = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+
+        public long Ticks { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Wall;
+
+        public override long GetTimestamp() => Ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+    }
+
+    [Fact]
+    public void Wall_clock_step_back_does_not_stall_a_pending_change()
+    {
+        var clock = new SteppedClock();
+        var filter = new HysteresisFilter(new HysteresisSettings(), clock);
+        filter.Apply(50, 30, 80);
+        filter.Apply(52, 30, 80);
+
+        clock.Wall -= TimeSpan.FromHours(1);
+        clock.Ticks += TimeSpan.TicksPerSecond;
+
+        Assert.Equal(52, filter.Apply(52, 30, 80));
+    }
+
     [Fact]
     public void Null_input_holds_current()
     {

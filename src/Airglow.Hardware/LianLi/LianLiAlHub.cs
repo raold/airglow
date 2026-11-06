@@ -8,9 +8,7 @@ public sealed class LianLiAlHub : IHardwareBackend
 {
     private const byte ReportId = 0xE0;
     private const int GroupCount = 4;
-    private const int FirmwareAttempts = 3;
     private static readonly TimeSpan CommandDelay = TimeSpan.FromMilliseconds(20);
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(2);
 
     private readonly IHidDevice _device;
     private readonly Action<TimeSpan> _sleep;
@@ -93,33 +91,26 @@ public sealed class LianLiAlHub : IHardwareBackend
 
     public void Dispose() => _device.Dispose();
 
+    // One attempt only: the engine retries the whole hub every few seconds, and waiting here would hold its lock.
     private AlFirmware? ReadFirmware()
     {
-        for (var attempt = 0; attempt < FirmwareAttempts; attempt++)
+        try
         {
-            if (attempt > 0)
+            lock (_lock)
             {
-                _sleep(RetryDelay);
-            }
+                SendFeature(ReportId, 0x50, 0x01);
+                _sleep(CommandDelay);
 
-            try
-            {
-                lock (_lock)
+                var buffer = NewInputBuffer();
+                var read = _device.GetInputReport(buffer);
+                if (read >= 6)
                 {
-                    SendFeature(ReportId, 0x50, 0x01);
-                    _sleep(CommandDelay);
-
-                    var buffer = NewInputBuffer();
-                    var read = _device.GetInputReport(buffer);
-                    if (read >= 6)
-                    {
-                        return new AlFirmware(buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
-                    }
+                    return new AlFirmware(buffer[1], buffer[2], buffer[3], buffer[4], buffer[5]);
                 }
             }
-            catch (IOException)
-            {
-            }
+        }
+        catch (IOException)
+        {
         }
 
         return null;

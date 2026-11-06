@@ -650,6 +650,45 @@ public class FanEngineTests
     }
 
     [Fact]
+    public void Sensor_missing_for_30s_reopens_sensor_backends_at_most_once_a_minute()
+    {
+        _engine.Tick();
+        _gpu.Backend.Temperatures.Remove("cpu.package");
+
+        for (var second = 1; second <= 30; second++)
+            Next();
+        Assert.False(_gpu.Backend.Disposed);
+
+        Next();
+        Assert.True(_gpu.Backend.Disposed);
+        Assert.False(_lianli.Backend.Disposed);
+
+        Next();
+        Assert.Equal(2, _gpu.Creates);
+        Assert.Equal(1, _lianli.Creates);
+
+        for (var second = 33; second <= 90; second++)
+            Next();
+        Assert.Equal(2, _gpu.Creates);
+        Assert.False(_gpu.Backend.Disposed);
+
+        Next();
+        Assert.True(_gpu.Backend.Disposed);
+        Next();
+        Assert.Equal(3, _gpu.Creates);
+    }
+
+    [Fact]
+    public void Present_sensors_never_reopen_backends()
+    {
+        for (var second = 0; second <= 120; second++)
+            Next();
+
+        Assert.Equal(1, _gpu.Creates);
+        Assert.Equal(1, _lianli.Creates);
+    }
+
+    [Fact]
     public void Unchanged_lianli_groups_keep_backends_open()
     {
         _engine.Tick();

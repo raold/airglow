@@ -5,7 +5,7 @@ public sealed class HysteresisFilter(HysteresisSettings settings, TimeProvider t
     private enum Direction { None, Up, Down }
 
     private Direction _pending;
-    private DateTimeOffset _pendingSince;
+    private long _pendingSince;
 
     public double? Current { get; private set; }
 
@@ -38,7 +38,7 @@ public sealed class HysteresisFilter(HysteresisSettings settings, TimeProvider t
             return Current;
         }
 
-        var now = time.GetUtcNow();
+        var now = time.GetTimestamp();
         if (_pending != direction)
         {
             _pending = direction;
@@ -46,7 +46,7 @@ public sealed class HysteresisFilter(HysteresisSettings settings, TimeProvider t
         }
 
         var response = direction == Direction.Up ? settings.ResponseUpSeconds : settings.ResponseDownSeconds;
-        if ((now - _pendingSince).TotalSeconds >= response)
+        if (time.GetElapsedTime(_pendingSince, now).TotalSeconds >= response)
         {
             Current = raw;
             _pending = Direction.None;

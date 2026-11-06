@@ -142,7 +142,7 @@ public sealed class FansPageTests
             .Add(c => c.PointsChanged, EventCallback.Factory.Create<IReadOnlyList<CurvePoint>>(this, next => points = next)));
 
         await editor.FindAll("circle.point")[1].TriggerEventAsync("onpointerdown", new PointerEventArgs { Buttons = 1 });
-        // x = 600 is about 105 C, clamped to 79.5 by the next point; y = 12 is 100%
+        // x = 600 is about 115 C, clamped to 79.5 by the next point; y = 12 is 100%
         await editor.Find("rect.drag-overlay").TriggerEventAsync("onpointermove", new PointerEventArgs { OffsetX = 600, OffsetY = 12, Buttons = 1 });
 
         Assert.Equal(new CurvePoint(79.5, 100), points[1]);
@@ -189,7 +189,7 @@ public sealed class FansPageTests
         await editor.FindAll("circle.point")[1].TriggerEventAsync("onpointerdown", new PointerEventArgs { Buttons = 1 });
         await editor.Find("rect.drag-overlay").TriggerEventAsync("onpointermove", new PointerEventArgs { OffsetX = 700, OffsetY = 100, Buttons = 1 });
 
-        Assert.Equal(110, points[1].Celsius);
+        Assert.Equal(120, points[1].Celsius);
     }
 
     [Fact]
