@@ -1,0 +1,47 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject LiveState Live
+
+<header class="topbar">
+    <div class="brand">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="16" cy="16" r="14" fill="currentColor" opacity="0.16" />
+            <circle cx="16" cy="16" r="2.4" fill="currentColor" />
+            <path d="M16 13.6c-1.2-3.6-.6-7.4 2.6-9.2 2 2.6 1.4 6.8-2.6 9.2Z" fill="currentColor" />
+            <path d="M18.4 16c3.6-1.2 7.4-.6 9.2 2.6-2.6 2-6.8 1.4-9.2-2.6Z" fill="currentColor" />
+            <path d="M16 18.4c1.2 3.6.6 7.4-2.6 9.2-2-2.6-1.4-6.8 2.6-9.2Z" fill="currentColor" />
+            <path d="M13.6 16c-3.6 1.2-7.4.6-9.2-2.6 2.6-2 6.8-1.4 9.2 2.6Z" fill="currentColor" />
+        </svg>
+        <span class="wordmark">airglow</span>
+    </div>
+    <div class="status-strip">
+        <div class="stat"><span class="stat-label">CPU package</span><span class="stat-value mono">@Temp("cpu.package")</span></div>
+        <div class="stat"><span class="stat-label">GPU core</span><span class="stat-value mono">@Temp("gpu.core")</span></div>
+        <div class="stat">
+            <span class="stat-label">Engine</span>
+            <span class="stat-value"><span class="dot @(Live.Connected ? "" : "bad")"></span>@(Live.Connected ? "Running" : "Not running")</span>
+        </div>
+    </div>
+</header>
+
+<div class="shell">
+    <nav class="rail">
+        <NavLink href="" Match="NavLinkMatch.All">Overview</NavLink>
+        <NavLink href="fans">Fans</NavLink>
+        <NavLink href="settings">Settings</NavLink>
+    </nav>
+    <main class="content">@Body</main>
+</div>
+
+@code {
+    protected override void OnInitialized() => Live.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private string Temp(string id) =>
+        Live.Connected && Live.State?.Temperatures.FirstOrDefault(t => t.Id == id)?.Celsius is { } c
+            ? $"{c:0} °C"
+            : "—";
+
+    public void Dispose() => Live.Changed -= OnChanged;
+}

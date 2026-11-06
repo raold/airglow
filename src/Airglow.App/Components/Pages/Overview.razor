@@ -1,0 +1,81 @@
+@page "/"
+@using Airglow.Core.Engine
+@implements IDisposable
+@inject LiveState Live
+
+<h1 class="page-title">Overview</h1>
+
+@if (!Live.Connected)
+{
+    <div class="banner bad" role="alert">The airglow engine isn't running.</div>
+}
+else if (Live.State is { } state)
+{
+    <section class="panel">
+        <h2 class="panel-title">Temperatures</h2>
+        <div class="temps">
+            @foreach (var t in Ordered(state.Temperatures))
+            {
+                <div class="temp">
+                    <span class="stat-label">@t.Name</span>
+                    <span class="temp-value mono">@(t.Celsius is { } c ? $"{c:0.0} °C" : "—")</span>
+                </div>
+            }
+        </div>
+        @foreach (var fault in state.Faults)
+        {
+            <p class="fault">@fault</p>
+        }
+    </section>
+
+    <div class="fan-grid">
+        @foreach (var fan in state.Fans)
+        {
+            <article class="fan-card">
+                <header class="fan-head">
+                    <h3>@fan.Name</h3>
+                    <span class="tag @TagClass(fan.Mode)">@fan.Mode</span>
+                </header>
+                <div class="fan-rpm"><span class="rpm mono">@(fan.Rpm?.ToString() ?? "—")</span><span class="unit">RPM</span></div>
+                <div class="fan-cmd">
+                    <span class="pct mono">@(fan.CommandedPercent is { } p ? $"{p}%" : "—")</span>
+                    <span class="meter"><span class="meter-fill" style="width:@(fan.CommandedPercent ?? 0)%"></span></span>
+                </div>
+                <div class="fan-curve"><span class="stat-label">Curve</span> <span class="mono">@(fan.CurveId ?? "—")</span></div>
+                @if (!string.IsNullOrEmpty(fan.Note))
+                {
+                    <p class="note">@fan.Note</p>
+                }
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private static readonly string[] WellKnown = ["cpu.package", "gpu.core", "gpu.hotspot", "gpu.memory"];
+
+    protected override void OnInitialized() => Live.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static IEnumerable<TempReading> Ordered(IReadOnlyList<TempReading> temps) =>
+        temps.OrderBy(t => Rank(t.Id)).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase);
+
+    private static int Rank(string id)
+    {
+        var i = Array.IndexOf(WellKnown, id);
+        return i < 0 ? WellKnown.Length : i;
+    }
+
+    private static string TagClass(FanMode mode) => mode switch
+    {
+        FanMode.Curve => "ok",
+        FanMode.Manual => "info",
+        FanMode.Auto => "info",
+        FanMode.Paused => "warn",
+        FanMode.Failsafe => "bad",
+        _ => "muted",
+    };
+
+    public void Dispose() => Live.Changed -= OnChanged;
+}
