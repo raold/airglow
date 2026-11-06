@@ -169,6 +169,7 @@ public sealed class EngineHost(
         var last = Interlocked.Read(ref _lastTick);
         if (sinceCheck > _watchdog.CheckEvery * 2)
         {
+            log.LogInformation("Watchdog re-armed after a {Seconds:N0} s pause (sleep or resume)", sinceCheck.TotalSeconds);
             _watchStart = now;
             if (last != NoTick)
                 Interlocked.CompareExchange(ref _lastTick, now, last);

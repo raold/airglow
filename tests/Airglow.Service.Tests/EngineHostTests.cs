@@ -155,6 +155,7 @@ public sealed class EngineHostTests : IDisposable
 
         _time.Advance(TimeSpan.FromSeconds(120));
         Assert.False(host.CheckWatchdog());
+        Assert.Single(_log.Entries, e => e is { Level: LogLevel.Information, Message: "Watchdog re-armed after a 120 s pause (sleep or resume)" });
 
         for (var second = 5; second < 15; second += 5)
         {
