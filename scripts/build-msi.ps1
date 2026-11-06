@@ -18,10 +18,10 @@ foreach ($dir in $serviceDir, $appDir, $msiDir) {
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
 }
 
-dotnet publish (Join-Path $root 'src\Airglow.Service') -c Release -r win-x64 --self-contained true -o $serviceDir
+dotnet publish (Join-Path $root 'src\Airglow.Service') -c Release -r win-x64 --self-contained true "-p:Version=$Version" -o $serviceDir
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish of the service failed.' }
 
-dotnet publish (Join-Path $root 'src\Airglow.App') -c Release -r win-x64 --self-contained true -o $appDir
+dotnet publish (Join-Path $root 'src\Airglow.App') -c Release -r win-x64 --self-contained true "-p:Version=$Version" -o $appDir
 if ($LASTEXITCODE -ne 0) { throw 'dotnet publish of the app failed.' }
 
 dotnet build (Join-Path $root 'installer\Airglow.Installer.wixproj') -c Release "-p:Version=$Version" "-p:ServiceDir=$serviceDir" "-p:AppDir=$appDir" -o $msiDir

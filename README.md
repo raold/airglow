@@ -83,8 +83,10 @@ Needs Windows 11 and the .NET 10 SDK.
 ```bash
 dotnet build Airglow.slnx
 dotnet test Airglow.slnx
-pwsh scripts/build-msi.ps1 -Version 0.1.0   # artifacts/airglow-0.1.0-x64.msi
+pwsh scripts/build-msi.ps1 -Version 0.0.9   # artifacts/airglow-0.0.9-x64.msi
 ```
+
+For a local MSI, use a version that isn't a release, so it never collides with a CI-built one.
 
 Reading CPU temperatures and installing the service need an admin shell.
 
