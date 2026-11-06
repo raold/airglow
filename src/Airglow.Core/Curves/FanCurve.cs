@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Airglow.Core.Curves;
 
 public readonly record struct CurvePoint(double Celsius, double Percent);
@@ -11,6 +13,10 @@ public sealed record HysteresisSettings(
 
 public enum MixFunction { Max, Min, Average }
 
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
+[JsonDerivedType(typeof(GraphCurve), "graph")]
+[JsonDerivedType(typeof(FlatCurve), "flat")]
+[JsonDerivedType(typeof(MixCurve), "mix")]
 public abstract record FanCurve(string Id, string Name);
 
 public sealed record GraphCurve(
