@@ -4,9 +4,9 @@
 
 <h1 class="page-title">Settings</h1>
 
-@if (_draft is null)
+@if (Draft.Value is not { } config)
 {
-    <div class="banner @(_loadError is null ? "" : "bad")" role="@(_loadError is null ? "status" : "alert")">@(_loadError ?? "Loading...")</div>
+    <LoadBanner Draft="Draft" Loaded="Refresh" />
 }
 else
 {
@@ -27,7 +27,7 @@ else
     <section class="panel">
         <h2 class="panel-title">Lian Li groups</h2>
         <div class="form-grid">
-            @foreach (var group in _draft.LianLiGroups)
+            @foreach (var group in config.LianLiGroups)
             {
                 var index = group.Index;
                 <label for="@($"group-name-{index}")">Group @(index + 1) name</label>
@@ -45,42 +45,22 @@ else
         <label class="check"><input id="autostart" type="checkbox" checked="@_autostart" @onchange="OnAutostartChanged" /> Start airglow with Windows</label>
     </section>
 
-    <div class="savebar">
-        @if (_errors.Count > 0)
-        {
-            <ul class="errors" role="alert">
-                @foreach (var error in _errors)
-                {
-                    <li>@error</li>
-                }
-            </ul>
-        }
-        @if (_notice is not null)
-        {
-            <p class="muted">@_notice</p>
-        }
-        <div class="actions">
-            <button type="button" class="btn primary" id="save" disabled="@(!_dirty || _busy)" @onclick="SaveAsync">Save</button>
-            <button type="button" class="btn" id="revert" disabled="@(!_dirty || _busy)" @onclick="RevertAsync">Revert</button>
-            @if (_dirty)
-            {
-                <span class="muted">Unsaved changes</span>
-            }
-        </div>
-    </div>
+    <SaveBar Draft="Draft" Changed="Refresh" />
 }
 
 @code {
-    private AppConfig? _draft;
-    private IReadOnlyList<string> _errors = [];
-    private string? _loadError;
-    private string? _notice;
-    private bool _dirty;
-    private bool _busy;
+    private ConfigDraft Draft = default!;
+
+    // Bound to the child components so the page re-renders after they save, revert or reload.
+    private void Refresh()
+    {
+    }
+
     private bool _autostart;
 
     protected override async Task OnInitializedAsync()
     {
+        Draft = new ConfigDraft(Client);
         try
         {
             _autostart = Autostart.IsEnabled;
@@ -89,49 +69,22 @@ else
         {
             _autostart = false;
         }
-        await LoadAsync();
+        await Draft.LoadAsync();
     }
 
-    private async Task LoadAsync()
-    {
-        try
-        {
-            _draft = await Client.GetConfigAsync(default);
-            _loadError = null;
-            _dirty = false;
-            _errors = [];
-        }
-        catch (Exception ex)
-        {
-            _loadError = $"Couldn't load the configuration: {ex.Message}";
-        }
-    }
+    private void UpdateEngine(Func<EngineSettings, EngineSettings> change) =>
+        Draft.Update(c => c with { Engine = change(c.Engine) });
 
-    private void UpdateEngine(Func<EngineSettings, EngineSettings> change)
-    {
-        _draft = _draft! with { Engine = change(_draft.Engine) };
-        Touch();
-    }
+    private void UpdateGroup(int index, Func<LianLiGroup, LianLiGroup> change) =>
+        Draft.Update(c => c with { LianLiGroups = [.. c.LianLiGroups.Select(g => g.Index == index ? change(g) : g)] });
 
-    private void UpdateGroup(int index, Func<LianLiGroup, LianLiGroup> change)
-    {
-        _draft = _draft! with { LianLiGroups = [.. _draft.LianLiGroups.Select(g => g.Index == index ? change(g) : g)] };
-        Touch();
-    }
+    private int Tick { get => Draft.Value!.Engine.TickMilliseconds; set => UpdateEngine(e => e with { TickMilliseconds = value }); }
 
-    private void Touch()
-    {
-        _dirty = true;
-        _notice = null;
-    }
+    private int FailsafePercent { get => Draft.Value!.Engine.FailsafePercent; set => UpdateEngine(e => e with { FailsafePercent = value }); }
 
-    private int Tick { get => _draft!.Engine.TickMilliseconds; set => UpdateEngine(e => e with { TickMilliseconds = value }); }
+    private double FailsafeAfter { get => Draft.Value!.Engine.FailsafeAfterSeconds; set => UpdateEngine(e => e with { FailsafeAfterSeconds = value }); }
 
-    private int FailsafePercent { get => _draft!.Engine.FailsafePercent; set => UpdateEngine(e => e with { FailsafePercent = value }); }
-
-    private double FailsafeAfter { get => _draft!.Engine.FailsafeAfterSeconds; set => UpdateEngine(e => e with { FailsafeAfterSeconds = value }); }
-
-    private int ShutdownPercent { get => _draft!.Engine.ShutdownPercent; set => UpdateEngine(e => e with { ShutdownPercent = value }); }
+    private int ShutdownPercent { get => Draft.Value!.Engine.ShutdownPercent; set => UpdateEngine(e => e with { ShutdownPercent = value }); }
 
     private void OnAutostartChanged(ChangeEventArgs e)
     {
@@ -140,50 +93,11 @@ else
         {
             Autostart.Set(enabled);
             _autostart = enabled;
-            _errors = [];
+            Draft.Errors = [];
         }
         catch (Exception ex)
         {
-            _errors = [$"Couldn't change the startup setting: {ex.Message}"];
-        }
-    }
-
-    private async Task SaveAsync()
-    {
-        if (_draft is null)
-            return;
-        _busy = true;
-        try
-        {
-            var errors = await Client.SaveConfigAsync(_draft, default);
-            _errors = errors;
-            if (errors.Count == 0)
-            {
-                _dirty = false;
-                _notice = "Saved.";
-            }
-        }
-        catch (Exception ex)
-        {
-            _errors = [$"Couldn't save: {ex.Message}"];
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    private async Task RevertAsync()
-    {
-        _busy = true;
-        try
-        {
-            await LoadAsync();
-            _notice = null;
-        }
-        finally
-        {
-            _busy = false;
+            Draft.Errors = [$"Couldn't change the startup setting: {ex.Message}"];
         }
     }
 }

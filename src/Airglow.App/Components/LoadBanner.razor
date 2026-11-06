@@ -1,0 +1,27 @@
+@using Airglow.App
+
+@if (Draft.LoadError is { } error)
+{
+    <div class="banner bad" role="alert">
+        @error
+        <button type="button" class="btn" id="retry" @onclick="RetryAsync">Retry</button>
+    </div>
+}
+else
+{
+    <div class="banner" role="status">Loading...</div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ConfigDraft Draft { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback Loaded { get; set; }
+
+    private async Task RetryAsync()
+    {
+        await Draft.LoadAsync();
+        await Loaded.InvokeAsync();
+    }
+}

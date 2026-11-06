@@ -28,7 +28,10 @@ public sealed class FansPageTests
 
         public Task<EngineState> GetStateAsync(CancellationToken ct) => throw new HttpRequestException("engine down");
 
-        public Task<AppConfig> GetConfigAsync(CancellationToken ct) => Task.FromResult(Config);
+        public bool FailLoad { get; set; }
+
+        public Task<AppConfig> GetConfigAsync(CancellationToken ct) =>
+            FailLoad ? throw new HttpRequestException("engine down") : Task.FromResult(Config);
 
         public Task<IReadOnlyList<string>> SaveConfigAsync(AppConfig config, CancellationToken ct)
         {
@@ -153,5 +156,53 @@ public sealed class FansPageTests
 
         Assert.Contains("<text", editor.Markup);
         Assert.DoesNotContain("svg:text", editor.Markup);
+    }
+
+    [Fact]
+    public async Task Curve_editor_clears_selection_when_points_are_replaced_externally()
+    {
+        IReadOnlyList<CurvePoint> a = [new(30, 20), new(50, 60), new(80, 100)];
+        IReadOnlyList<CurvePoint> b = [new(10, 10), new(40, 50), new(90, 90)];
+        var changes = 0;
+        using var ctx = new BunitContext();
+        var editor = ctx.Render<CurveEditor>(p => p
+            .Add(c => c.Points, a)
+            .Add(c => c.PointsChanged, EventCallback.Factory.Create<IReadOnlyList<CurvePoint>>(this, _ => changes++)));
+        await editor.FindAll("circle.point")[1].TriggerEventAsync("onpointerdown", new PointerEventArgs { Buttons = 1 });
+
+        editor.Render(p => p.Add(c => c.Points, b));
+        await editor.Find("svg").TriggerEventAsync("onkeydown", new KeyboardEventArgs { Key = "Delete" });
+
+        Assert.Equal(0, changes);
+        Assert.Equal(3, editor.FindAll("circle.point").Count);
+    }
+
+    [Fact]
+    public async Task Curve_editor_drag_past_the_right_edge_stays_inside_the_chart()
+    {
+        IReadOnlyList<CurvePoint> points = [new(30, 20), new(50, 60)];
+        using var ctx = new BunitContext();
+        var editor = ctx.Render<CurveEditor>(p => p
+            .Add(c => c.Points, points)
+            .Add(c => c.PointsChanged, EventCallback.Factory.Create<IReadOnlyList<CurvePoint>>(this, next => points = next)));
+
+        await editor.FindAll("circle.point")[1].TriggerEventAsync("onpointerdown", new PointerEventArgs { Buttons = 1 });
+        await editor.Find("rect.drag-overlay").TriggerEventAsync("onpointermove", new PointerEventArgs { OffsetX = 700, OffsetY = 100, Buttons = 1 });
+
+        Assert.Equal(110, points[1].Celsius);
+    }
+
+    [Fact]
+    public async Task Load_failure_shows_retry_that_loads_the_page()
+    {
+        var client = new FakeClient { FailLoad = true };
+        using var ctx = NewContext(client);
+        var page = ctx.Render<Fans>();
+        Assert.Contains("Couldn't load", page.Find(".banner").TextContent);
+
+        client.FailLoad = false;
+        page.Find("#retry").Click();
+
+        Assert.NotEmpty(page.FindAll(".fan-item"));
     }
 }

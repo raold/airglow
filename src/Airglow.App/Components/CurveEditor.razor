@@ -58,6 +58,7 @@
 
     private int? _selected;
     private int? _drag;
+    private IReadOnlyList<CurvePoint>? _known;
 
     [Parameter, EditorRequired]
     public IReadOnlyList<CurvePoint> Points { get; set; } = [];
@@ -88,7 +89,22 @@
     private static double Y(double percent) => Bottom - percent / 100 * (Bottom - Top);
 
     private static CurvePoint At(double x, double y) =>
-        new((x - Left) / (Right - Left) * MaxCelsius, (Bottom - y) / (Bottom - Top) * 100);
+        new(Math.Clamp((x - Left) / (Right - Left) * MaxCelsius, 0, MaxCelsius), (Bottom - y) / (Bottom - Top) * 100);
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Points, _known))
+            return;
+        _known = Points;
+        _selected = null;
+        _drag = null;
+    }
+
+    private async Task Emit(IReadOnlyList<CurvePoint> next)
+    {
+        _known = next;
+        await PointsChanged.InvokeAsync(next);
+    }
 
     private string Line() => string.Join(' ', Points.Select(p => FormattableString.Invariant($"{X(p.Celsius):0.##},{Y(p.Percent):0.##}")));
 
@@ -113,7 +129,7 @@
 
         var next = CurveEditing.Move(Points, index, At(e.OffsetX, e.OffsetY));
         if (!next.SequenceEqual(Points))
-            await PointsChanged.InvokeAsync(next);
+            await Emit(next);
     }
 
     private void EndDrag() => _drag = null;
@@ -128,7 +144,7 @@
             return;
 
         _selected = next.Select((p, i) => (p, i)).First(x => !Points.Contains(x.p)).i;
-        await PointsChanged.InvokeAsync(next);
+        await Emit(next);
     }
 
     private async Task OnKeyDown(KeyboardEventArgs e)
@@ -139,7 +155,7 @@
 
     private async Task RemoveSelectedAsync()
     {
-        if (_selected is not { } index)
+        if (_selected is not { } index || index >= Points.Count)
             return;
 
         var next = CurveEditing.Remove(Points, index);
@@ -147,6 +163,6 @@
             return;
 
         _selected = null;
-        await PointsChanged.InvokeAsync(next);
+        await Emit(next);
     }
 }

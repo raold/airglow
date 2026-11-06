@@ -9,18 +9,18 @@
 
 <h1 class="page-title">Fans</h1>
 
-@if (_draft is null)
+@if (Draft.Value is null)
 {
-    <div class="banner @(_loadError is null ? "" : "bad")" role="@(_loadError is null ? "status" : "alert")">@(_loadError ?? "Loading...")</div>
+    <LoadBanner Draft="Draft" Loaded="Refresh" />
 }
 else
 {
     <div class="fans-layout">
         <ul class="fan-list">
-            @foreach (var f in _draft.Fans)
+            @foreach (var f in Cfg.Fans)
             {
                 var id = f.FanId;
-                <li><button type="button" class="fan-item @(id == _fanId ? "active" : "")" @onclick="() => Select(id)">
+                <li><button type="button" class="fan-item @(id == Fan?.FanId ? "active" : "")" @onclick="() => Select(id)">
                     <span>@f.Name</span>
                     <span class="mono muted">@Percent(id)</span>
                 </button></li>
@@ -36,7 +36,7 @@ else
                         <label for="fan-curve">Curve</label>
                         <select id="fan-curve" @bind="CurveId" @bind:event="onchange">
                             <option value="">None (manual only)</option>
-                            @foreach (var c in _draft.Curves)
+                            @foreach (var c in Cfg.Curves)
                             {
                                 <option value="@c.Id">@c.Name</option>
                             }
@@ -101,7 +101,7 @@ else
                                     <label for="hyst-limits">Ignore at limits</label>
                                     <input id="hyst-limits" type="checkbox" checked="@graph.Hysteresis.IgnoreAtLimits" @onchange="e => UpdateHysteresis(h => h with { IgnoreAtLimits = (bool)(e.Value ?? false) })" />
                                 </div>
-                                <CurveEditor Points="graph.Points" PointsChanged="points => UpdateGraph(g => g with { Points = points })"
+                                <CurveEditor @key="curve.Id" Points="graph.Points" PointsChanged="points => UpdateGraph(g => g with { Points = points })"
                                              LiveCelsius="LiveCelsius(graph.SensorId)" LivePercent="LiveFan?.CurvePercent" />
                                 break;
                             case FlatCurve flat:
@@ -121,7 +121,7 @@ else
                                     </select>
                                     <span>Members</span>
                                     <div class="members">
-                                        @foreach (var other in _draft.Curves.Where(c => c.Id != mix.Id))
+                                        @foreach (var other in Cfg.Curves.Where(c => c.Id != mix.Id))
                                         {
                                             var memberId = other.Id;
                                             <label class="check"><input type="checkbox" checked="@mix.CurveIds.Contains(memberId)" @onchange="e => ToggleMember(memberId, (bool)(e.Value ?? false))" /> @other.Name</label>
@@ -145,48 +145,28 @@ else
         </div>
     </div>
 
-    <div class="savebar">
-        @if (_errors.Count > 0)
-        {
-            <ul class="errors" role="alert">
-                @foreach (var error in _errors)
-                {
-                    <li>@error</li>
-                }
-            </ul>
-        }
-        @if (_notice is not null)
-        {
-            <p class="muted">@_notice</p>
-        }
-        <div class="actions">
-            <button type="button" class="btn primary" id="save" disabled="@(!_dirty || _busy)" @onclick="SaveAsync">Save</button>
-            <button type="button" class="btn" id="revert" disabled="@(!_dirty || _busy)" @onclick="RevertAsync">Revert</button>
-            @if (_dirty)
-            {
-                <span class="muted">Unsaved changes</span>
-            }
-        </div>
-    </div>
+    <SaveBar Draft="Draft" Changed="Refresh" />
 }
 
 @code {
     private static readonly string[] WellKnown = ["cpu.package", "gpu.core", "gpu.hotspot", "gpu.memory"];
 
-    private AppConfig? _draft;
+    private ConfigDraft Draft = default!;
+
+    // Bound to the child components so the page re-renders after they save, revert or reload.
+    private void Refresh()
+    {
+    }
+
     private IReadOnlyList<SensorInfo> _sensors = [];
-    private IReadOnlyList<string> _errors = [];
     private readonly Dictionary<string, int?> _manual = [];
     private string? _fanId;
-    private string? _loadError;
-    private string? _notice;
-    private bool _dirty;
-    private bool _busy;
 
     protected override async Task OnInitializedAsync()
     {
         Live.Changed += OnChanged;
-        await LoadAsync();
+        Draft = new ConfigDraft(Client);
+        await Draft.LoadAsync();
         try
         {
             _sensors = await Client.GetSensorsAsync(default);
@@ -197,30 +177,15 @@ else
         }
     }
 
-    private async Task LoadAsync()
-    {
-        try
-        {
-            _draft = await Client.GetConfigAsync(default);
-            _loadError = null;
-            _dirty = false;
-            _errors = [];
-            if (_fanId is null || !_draft.Fans.Any(f => f.FanId == _fanId))
-                _fanId = _draft.Fans.FirstOrDefault()?.FanId;
-        }
-        catch (Exception ex)
-        {
-            _loadError = $"Couldn't load the configuration: {ex.Message}";
-        }
-    }
-
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private FanTarget? Fan => _draft?.Fans.FirstOrDefault(f => f.FanId == _fanId);
+    private AppConfig Cfg => Draft.Value!;
 
-    private FanCurve? Curve => Fan?.CurveId is { } id ? _draft!.Curves.FirstOrDefault(c => c.Id == id) : null;
+    private FanTarget? Fan => Draft.Value is { } c ? c.Fans.FirstOrDefault(f => f.FanId == _fanId) ?? c.Fans.FirstOrDefault() : null;
 
-    private FanReading? LiveFan => Live.State?.Fans.FirstOrDefault(f => f.Id == _fanId);
+    private FanCurve? Curve => Fan?.CurveId is { } id ? Cfg.Curves.FirstOrDefault(c => c.Id == id) : null;
+
+    private FanReading? LiveFan => Live.State?.Fans.FirstOrDefault(f => f.Id == Fan?.FanId);
 
     private string Percent(string fanId) =>
         Live.State?.Fans.FirstOrDefault(f => f.Id == fanId)?.CommandedPercent is { } p ? $"{p}%" : "";
@@ -256,21 +221,15 @@ else
     private void Select(string id)
     {
         _fanId = id;
-        _notice = null;
+        Draft.ClearNotice();
     }
 
     // Fan fields
 
     private void UpdateFan(Func<FanTarget, FanTarget> change)
     {
-        _draft = _draft! with { Fans = [.. _draft.Fans.Select(f => f.FanId == _fanId ? change(f) : f)] };
-        Touch();
-    }
-
-    private void Touch()
-    {
-        _dirty = true;
-        _notice = null;
+        var id = Fan!.FanId;
+        Draft.Update(c => c with { Fans = [.. c.Fans.Select(f => f.FanId == id ? change(f) : f)] });
     }
 
     private string CurveId
@@ -294,7 +253,7 @@ else
     // Manual override
 
     private int? ManualValue =>
-        _fanId is { } id && _manual.TryGetValue(id, out var m)
+        Fan?.FanId is { } id && _manual.TryGetValue(id, out var m)
             ? m
             : LiveFan is { Mode: FanMode.Manual, CommandedPercent: { } p } ? p : null;
 
@@ -308,17 +267,17 @@ else
 
     private async Task SetManualAsync(int? percent)
     {
-        if (_fanId is not { } id)
+        if (Fan?.FanId is not { } id)
             return;
         try
         {
             await Client.SetManualAsync(id, percent, default);
             _manual[id] = percent;
-            _errors = [];
+            Draft.Errors = [];
         }
         catch (Exception ex)
         {
-            _errors = [$"Couldn't set the manual override: {ex.Message}"];
+            Draft.Errors = [$"Couldn't set the manual override: {ex.Message}"];
         }
     }
 
@@ -328,8 +287,7 @@ else
     {
         if (Curve is not { } current)
             return;
-        _draft = _draft! with { Curves = [.. _draft.Curves.Select(c => c.Id == current.Id ? change(c) : c)] };
-        Touch();
+        Draft.Update(c => c with { Curves = [.. c.Curves.Select(x => x.Id == current.Id ? change(x) : x)] });
     }
 
     private void UpdateGraph(Func<GraphCurve, GraphCurve> change) => UpdateCurve(c => change((GraphCurve)c));
@@ -351,7 +309,7 @@ else
     {
         if (Curve is not { } current || type == TypeOf(current))
             return;
-        var first = _draft!.Curves.FirstOrDefault(c => c.Id != current.Id);
+        var first = Cfg.Curves.FirstOrDefault(c => c.Id != current.Id);
         UpdateCurve(c => type switch
         {
             "flat" => new FlatCurve(c.Id, c.Name, 50),
@@ -363,7 +321,7 @@ else
     private string NextCurveId()
     {
         var n = 1;
-        while (_draft!.Curves.Any(c => c.Id == $"curve-{n}"))
+        while (Cfg.Curves.Any(c => c.Id == $"curve-{n}"))
             n++;
         return $"curve-{n}";
     }
@@ -373,7 +331,7 @@ else
 
     private void AddCurve(FanCurve curve)
     {
-        _draft = _draft! with { Curves = [.. _draft.Curves, curve] };
+        Draft.Update(c => c with { Curves = [.. c.Curves, curve] });
         UpdateFan(f => f with { CurveId = curve.Id });
     }
 
@@ -390,56 +348,14 @@ else
         if (Curve is not { } curve)
             return;
 
-        var curves = _draft!.Curves
+        var curves = Cfg.Curves
             .Where(c => c.Id != curve.Id)
             .Select(c => c is MixCurve m && m.CurveIds.Contains(curve.Id)
                 ? m with { CurveIds = [.. m.CurveIds.Where(id => id != curve.Id)] }
                 : c)
             .ToList();
-        var fans = _draft.Fans.Select(f => f.CurveId == curve.Id ? f with { CurveId = null } : f).ToList();
-        _draft = _draft with { Curves = curves, Fans = fans };
-        Touch();
-    }
-
-    // Save and revert
-
-    private async Task SaveAsync()
-    {
-        if (_draft is null)
-            return;
-        _busy = true;
-        try
-        {
-            var errors = await Client.SaveConfigAsync(_draft, default);
-            _errors = errors;
-            if (errors.Count == 0)
-            {
-                _dirty = false;
-                _notice = "Saved.";
-            }
-        }
-        catch (Exception ex)
-        {
-            _errors = [$"Couldn't save: {ex.Message}"];
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
-
-    private async Task RevertAsync()
-    {
-        _busy = true;
-        try
-        {
-            await LoadAsync();
-            _notice = null;
-        }
-        finally
-        {
-            _busy = false;
-        }
+        var fans = Cfg.Fans.Select(f => f.CurveId == curve.Id ? f with { CurveId = null } : f).ToList();
+        Draft.Update(c => c with { Curves = curves, Fans = fans });
     }
 
     public void Dispose() => Live.Changed -= OnChanged;

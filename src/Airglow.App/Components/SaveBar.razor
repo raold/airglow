@@ -1,0 +1,45 @@
+@using Airglow.App
+
+<div class="savebar">
+    @if (Draft.Errors.Count > 0)
+    {
+        <ul class="errors" role="alert">
+            @foreach (var error in Draft.Errors)
+            {
+                <li>@error</li>
+            }
+        </ul>
+    }
+    @if (Draft.Notice is not null)
+    {
+        <p class="muted">@Draft.Notice</p>
+    }
+    <div class="actions">
+        <button type="button" class="btn primary" id="save" disabled="@(!Draft.Dirty || Draft.Busy)" @onclick="SaveAsync">Save</button>
+        <button type="button" class="btn" id="revert" disabled="@(!Draft.Dirty || Draft.Busy)" @onclick="RevertAsync">Revert</button>
+        @if (Draft.Dirty)
+        {
+            <span class="muted">Unsaved changes</span>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public ConfigDraft Draft { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback Changed { get; set; }
+
+    private async Task SaveAsync()
+    {
+        await Draft.SaveAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RevertAsync()
+    {
+        await Draft.RevertAsync();
+        await Changed.InvokeAsync();
+    }
+}
