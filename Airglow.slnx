@@ -1,8 +1,10 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Airglow.Core/Airglow.Core.csproj" />
+    <Project Path="src/Airglow.Hardware/Airglow.Hardware.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Airglow.Core.Tests/Airglow.Core.Tests.csproj" />
+    <Project Path="tests/Airglow.Hardware.Tests/Airglow.Hardware.Tests.csproj" />
   </Folder>
 </Solution>
