@@ -71,11 +71,11 @@ internal static unsafe partial class HidNative
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool HidD_GetSerialNumberString(SafeFileHandle device, char* buffer, uint bufferLength);
 
-    [LibraryImport("hid.dll")]
+    [LibraryImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool HidD_SetFeature(SafeFileHandle device, byte* report, uint reportLength);
 
-    [LibraryImport("hid.dll")]
+    [LibraryImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.U1)]
     public static partial bool HidD_GetInputReport(SafeFileHandle device, byte* report, uint reportLength);
 
