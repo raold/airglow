@@ -12,4 +12,8 @@
     <ProjectReference Include="..\Airglow.Core\Airglow.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+  </ItemGroup>
+
 </Project>

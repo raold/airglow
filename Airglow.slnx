@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Airglow.Core/Airglow.Core.csproj" />
     <Project Path="src/Airglow.Hardware/Airglow.Hardware.csproj" />
+    <Project Path="src/Airglow.Probe/Airglow.Probe.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Airglow.Core.Tests/Airglow.Core.Tests.csproj" />
