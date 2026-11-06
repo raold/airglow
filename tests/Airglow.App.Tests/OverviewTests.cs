@@ -107,4 +107,59 @@ public sealed class OverviewTests
         Assert.True(Volatile.Read(ref calls) > before);
         Assert.True(live.Connected);
     }
+
+    private static EngineState WithTemps(IEnumerable<TempReading> temps) =>
+        new(DateTimeOffset.UnixEpoch, temps.ToArray(), [Fan("f1", "Fan 1")], []);
+
+    private static IEnumerable<TempReading> WellKnownTemps() =>
+    [
+        new("gpu.memory", "GPU Memory", 50),
+        new("cpu.package", "CPU Package", 40),
+        new("gpu.hotspot", "GPU Hot Spot", 60),
+        new("gpu.core", "GPU Core", 45),
+    ];
+
+    [Fact]
+    public async Task Fans_panel_renders_before_temperatures()
+    {
+        var (ctx, page) = await RenderAsync(new FakeClient { State = StateOf(Fan("f1", "Fan 1")) });
+        using (ctx)
+        {
+            var titles = page.FindAll(".panel-title").Select(t => t.TextContent).ToList();
+            Assert.Equal(["Fans", "Temperatures"], titles);
+        }
+    }
+
+    [Fact]
+    public async Task Temperatures_show_only_well_known_until_toggled()
+    {
+        var others = Enumerable.Range(1, 10).Select(i => new TempReading($"core{i}", $"Core {i:00}", 30 + i));
+        var (ctx, page) = await RenderAsync(new FakeClient { State = WithTemps(WellKnownTemps().Concat(others)) });
+        using (ctx)
+        {
+            var tiles = page.FindAll(".temp");
+            Assert.Equal(4, tiles.Count);
+            Assert.Equal(["CPU Package", "GPU Core", "GPU Hot Spot", "GPU Memory"],
+                tiles.Select(t => t.QuerySelector(".stat-label")!.TextContent));
+            var toggle = page.Find(".toggle");
+            Assert.Equal("Show all sensors (10)", toggle.TextContent);
+
+            toggle.Click();
+
+            Assert.Equal(14, page.FindAll(".temp").Count);
+            Assert.Equal("Hide other sensors", page.Find(".toggle").TextContent);
+        }
+    }
+
+    [Fact]
+    public async Task Distance_to_tjmax_sensors_never_show()
+    {
+        var temps = WellKnownTemps().Append(new TempReading("x", "CPU Core #1 Distance to TjMax", 60));
+        var (ctx, page) = await RenderAsync(new FakeClient { State = WithTemps(temps) });
+        using (ctx)
+        {
+            Assert.Empty(page.FindAll(".toggle"));
+            Assert.DoesNotContain("TjMax", page.Markup);
+        }
+    }
 }

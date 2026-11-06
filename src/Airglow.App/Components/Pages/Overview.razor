@@ -12,9 +12,34 @@
 else if (Live.State is { } state)
 {
     <section class="panel">
+        <h2 class="panel-title">Fans</h2>
+        <div class="fan-grid">
+            @foreach (var fan in state.Fans)
+            {
+                <article class="fan-card">
+                    <header class="fan-head">
+                        <h3>@fan.Name</h3>
+                        <span class="tag @TagClass(fan.Mode)">@fan.Mode</span>
+                    </header>
+                    <div class="fan-rpm"><span class="rpm mono">@(fan.Rpm?.ToString() ?? "—")</span><span class="unit">RPM</span></div>
+                    <div class="fan-cmd">
+                        <span class="pct mono">@(fan.CommandedPercent is { } p ? $"{p}%" : "—")</span>
+                        <span class="meter"><span class="meter-fill" style="width:@(fan.CommandedPercent ?? 0)%"></span></span>
+                    </div>
+                    <div class="fan-curve"><span class="stat-label">Curve</span> <span class="mono">@(fan.CurveId ?? "—")</span></div>
+                    @if (!string.IsNullOrEmpty(fan.Note))
+                    {
+                        <p class="note">@fan.Note</p>
+                    }
+                </article>
+            }
+        </div>
+    </section>
+
+    <section class="panel">
         <h2 class="panel-title">Temperatures</h2>
         <div class="temps">
-            @foreach (var t in Ordered(state.Temperatures))
+            @foreach (var t in Shown(state.Temperatures))
             {
                 <div class="temp">
                     <span class="stat-label">@t.Name</span>
@@ -22,33 +47,16 @@ else if (Live.State is { } state)
                 </div>
             }
         </div>
+        @{ var others = Others(state.Temperatures).Count(); }
+        @if (others > 0)
+        {
+            <button type="button" class="toggle" @onclick="() => _showAll = !_showAll">@(_showAll ? "Hide other sensors" : $"Show all sensors ({others})")</button>
+        }
         @foreach (var fault in state.Faults)
         {
             <p class="fault">@fault</p>
         }
     </section>
-
-    <div class="fan-grid">
-        @foreach (var fan in state.Fans)
-        {
-            <article class="fan-card">
-                <header class="fan-head">
-                    <h3>@fan.Name</h3>
-                    <span class="tag @TagClass(fan.Mode)">@fan.Mode</span>
-                </header>
-                <div class="fan-rpm"><span class="rpm mono">@(fan.Rpm?.ToString() ?? "—")</span><span class="unit">RPM</span></div>
-                <div class="fan-cmd">
-                    <span class="pct mono">@(fan.CommandedPercent is { } p ? $"{p}%" : "—")</span>
-                    <span class="meter"><span class="meter-fill" style="width:@(fan.CommandedPercent ?? 0)%"></span></span>
-                </div>
-                <div class="fan-curve"><span class="stat-label">Curve</span> <span class="mono">@(fan.CurveId ?? "—")</span></div>
-                @if (!string.IsNullOrEmpty(fan.Note))
-                {
-                    <p class="note">@fan.Note</p>
-                }
-            </article>
-        }
-    </div>
 }
 
 @code {
@@ -58,14 +66,17 @@ else if (Live.State is { } state)
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
-    private static IEnumerable<TempReading> Ordered(IReadOnlyList<TempReading> temps) =>
-        temps.OrderBy(t => Rank(t.Id)).ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase);
+    private bool _showAll;
 
-    private static int Rank(string id)
-    {
-        var i = Array.IndexOf(WellKnown, id);
-        return i < 0 ? WellKnown.Length : i;
-    }
+    private static IEnumerable<TempReading> Primary(IReadOnlyList<TempReading> temps) =>
+        WellKnown.Select(id => temps.FirstOrDefault(t => t.Id == id)).OfType<TempReading>();
+
+    private static IEnumerable<TempReading> Others(IReadOnlyList<TempReading> temps) =>
+        temps.Where(t => !WellKnown.Contains(t.Id) && !t.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(t => t.Name, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<TempReading> Shown(IReadOnlyList<TempReading> temps) =>
+        _showAll ? Primary(temps).Concat(Others(temps)) : Primary(temps);
 
     private static string TagClass(FanMode mode) => mode switch
     {

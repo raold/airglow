@@ -413,3 +413,20 @@ p {
 .tag.bad { --tag: var(--bad); }
 .tag.info { --tag: var(--info); }
 .tag.muted { --tag: var(--muted); }
+
+.toggle {
+  margin-top: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  border-color: var(--accent);
+}
