@@ -1,0 +1,13 @@
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+.vs/
+.idea/
+*.user
+*.suo
+*.swp
+*.log
+__pycache__/
+.venv/
