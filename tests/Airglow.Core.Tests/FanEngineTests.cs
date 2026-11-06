@@ -1,4 +1,5 @@
 using Airglow.Core.Config;
+using Airglow.Core.Curves;
 using Airglow.Core.Engine;
 using Airglow.Tests.Shared;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -531,6 +532,121 @@ public class FanEngineTests
         Assert.Equal(2, _gpu.Creates);
         Assert.Equal(2, _lianli.Creates);
         Assert.Equal(5, _lianli.LastConfig!.LianLiGroups.Single(g => g.Index == 1).FanCount);
+    }
+
+    [Fact]
+    public void Conflict_check_failure_pauses_every_fan_and_recovers()
+    {
+        _engine.Tick();
+        _conflicts.ThrowOnCheck = new InvalidOperationException("detector broke");
+        _time.Advance(TimeSpan.FromSeconds(FanEngine.ResendSeconds));
+
+        var state = _engine.Tick();
+
+        Assert.All(GpuFans.Concat(LianLiFans), id => Assert.Single(Fan(id).Calls));
+        Assert.Equal(6, state.Fans.Count);
+        Assert.All(state.Fans, f => Assert.Equal(FanMode.Paused, f.Mode));
+        Assert.Equal("Conflict check failed: detector broke", Reading(state, "gpu.fan1").Note);
+        Assert.Equal(["Conflict check failed: detector broke"], state.Faults);
+        Assert.Contains(state.Temperatures, t => t.Id == "gpu.core" && t.Celsius == 52.65);
+
+        _conflicts.ThrowOnCheck = null;
+        var recovered = Next();
+
+        Assert.Empty(recovered.Faults);
+        Assert.All(recovered.Fans, f => Assert.Equal(FanMode.Curve, f.Mode));
+        Assert.All(GpuFans.Concat(LianLiFans), id => Assert.Equal(2, Fan(id).Calls.Count));
+    }
+
+    [Fact]
+    public void Curve_evaluation_failure_holds_then_goes_to_failsafe()
+    {
+        _engine.Tick();
+        _engine.ApplyConfig(_config with
+        {
+            Curves = [.. _config.Curves, new MixCurve("broken", "Broken", MixFunction.Max, ["nope"])],
+        });
+
+        for (var second = 1; second <= 4; second++)
+        {
+            var state = Next();
+            Assert.Equal(FanMode.Curve, Reading(state, "gpu.fan1").Mode);
+            Assert.Equal(50, Reading(state, "gpu.fan1").CommandedPercent);
+            Assert.Contains(state.Faults, f => f.StartsWith("Curve evaluation failed: "));
+        }
+        Assert.Equal(["SetPercent(50)"], Fan("gpu.fan1").Calls);
+
+        var failsafe = Next();
+
+        Assert.All(failsafe.Fans, f => Assert.Equal(FanMode.Failsafe, f.Mode));
+        Assert.All(GpuFans.Concat(LianLiFans), id => Assert.Equal("SetPercent(100)", Fan(id).Calls[^1]));
+
+        _engine.ApplyConfig(_config);
+        var recovered = Next();
+
+        Assert.Empty(recovered.Faults);
+        Assert.Equal(FanMode.Curve, Reading(recovered, "gpu.fan1").Mode);
+    }
+
+    [Fact]
+    public void Per_fan_failure_does_not_stop_the_other_fans()
+    {
+        GpuCore = 30;
+        Fan("gpu.fan1").ThrowOnSupportsAuto = new InvalidOperationException("channel broke");
+
+        var state = _engine.Tick();
+
+        Assert.Empty(Fan("gpu.fan1").Calls);
+        Assert.Equal(FanMode.Unavailable, Reading(state, "gpu.fan1").Mode);
+        Assert.Equal("GPU fan 1: channel broke", Reading(state, "gpu.fan1").Note);
+        Assert.Contains("GPU fan 1: channel broke", state.Faults);
+        Assert.Equal(["SetAuto()"], Fan("gpu.fan2").Calls);
+        Assert.All(LianLiFans, id => Assert.Single(Fan(id).Calls));
+
+        Fan("gpu.fan1").ThrowOnSupportsAuto = null;
+        var recovered = Next();
+
+        Assert.Empty(recovered.Faults);
+        Assert.Equal(["SetAuto()"], Fan("gpu.fan1").Calls);
+    }
+
+    [Fact]
+    public void Emergency_hand_back_sets_gpu_auto_and_lianli_failsafe()
+    {
+        _engine.ApplyConfig(_config with { Engine = _config.Engine with { FailsafePercent = 80 } });
+        _engine.Tick();
+
+        _engine.EmergencyHandBack();
+
+        Assert.All(GpuFans, id => Assert.Equal(["SetPercent(50)", "SetAuto()"], Fan(id).Calls));
+        Assert.All(LianLiFans, id => Assert.Equal("SetPercent(80)", Fan(id).Calls[^1]));
+        Assert.All(LianLiFans, id => Assert.Equal(2, Fan(id).Calls.Count));
+    }
+
+    [Fact]
+    public void Emergency_hand_back_skips_paused_slots_and_survives_write_errors()
+    {
+        _engine.Tick();
+        _conflicts.RunningProcesses.Add("FanControl");
+        Next();
+        Fan("lianli.g1").ThrowOnWrite = new IOException("write failed");
+
+        _engine.EmergencyHandBack();
+
+        Assert.All(GpuFans, id => Assert.Equal(["SetPercent(50)"], Fan(id).Calls));
+        Assert.Single(Fan("lianli.g1").Calls);
+        Assert.All(LianLiFans.Skip(1), id => Assert.Equal("SetPercent(100)", Fan(id).Calls[^1]));
+    }
+
+    [Fact]
+    public void Next_good_tick_after_emergency_hand_back_rewrites_at_once()
+    {
+        _engine.Tick();
+        _engine.EmergencyHandBack();
+
+        Next();
+
+        Assert.Equal(["SetPercent(50)", "SetAuto()", "SetPercent(50)"], Fan("gpu.fan1").Calls);
     }
 
     [Fact]

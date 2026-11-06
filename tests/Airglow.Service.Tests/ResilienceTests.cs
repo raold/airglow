@@ -16,12 +16,30 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Airglow.Service.Tests;
 
-public sealed class ThrowingConflicts(bool throwing) : IConflictDetector
+public sealed class BlockingConflicts : IConflictDetector, IDisposable
 {
-    public volatile bool Throwing = throwing;
+    private readonly ManualResetEventSlim _released = new(false);
 
-    public IReadOnlySet<string> Running(IEnumerable<string> processNames) =>
-        Throwing ? throw new InvalidOperationException("detector broke") : new HashSet<string>();
+    public volatile bool Blocking;
+
+    public IReadOnlySet<string> Running(IEnumerable<string> processNames)
+    {
+        if (Blocking)
+            _released.Wait();
+        return new HashSet<string>();
+    }
+
+    public void Release()
+    {
+        Blocking = false;
+        _released.Set();
+    }
+
+    public void Dispose()
+    {
+        Release();
+        _released.Dispose();
+    }
 }
 
 public sealed class ResilienceTests : IDisposable
@@ -48,7 +66,7 @@ public sealed class ResilienceTests : IDisposable
         new ConfigStore(_configPath).Save(seed with { Engine = seed.Engine with { TickMilliseconds = 250 } });
     }
 
-    private void Start(IConflictDetector conflicts)
+    private void Start(IConflictDetector conflicts, WatchdogOptions? watchdog = null)
     {
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
         {
@@ -61,6 +79,8 @@ public sealed class ResilienceTests : IDisposable
                 services.AddSingleton<IBackendFactory>(_gpu);
                 services.AddSingleton<IBackendFactory>(_lianli);
                 services.AddSingleton(conflicts);
+                if (watchdog is not null)
+                    services.AddSingleton(watchdog);
             });
         });
         _client = _factory.CreateClient();
@@ -83,15 +103,16 @@ public sealed class ResilienceTests : IDisposable
         }
     }
 
+    private FakeFanChannel BrokenFan => _lianli.Backend.Fan("lianli.g1");
+
     [Fact]
     public async Task Tick_failure_keeps_one_fault_and_clears_when_ticks_recover()
     {
         SeedValid();
-        var conflicts = new ThrowingConflicts(false);
-        Start(conflicts);
+        Start(new FakeConflicts());
         await WaitForState(s => s.Fans.Count == 6);
 
-        conflicts.Throwing = true;
+        BrokenFan.ThrowOnRpm = new InvalidOperationException("engine bug");
         var failing = await WaitForState(s => s.Faults.Any(f => f.StartsWith("Engine tick failed")));
         Assert.Equal(6, failing.Fans.Count);
         await Task.Delay(1000);
@@ -100,7 +121,7 @@ public sealed class ResilienceTests : IDisposable
         Assert.Single(later.Faults, f => f.StartsWith("Engine tick failed"));
         Assert.Single(later.Faults);
 
-        conflicts.Throwing = false;
+        BrokenFan.ThrowOnRpm = null;
         var recovered = await WaitForState(s => s.Faults.Count == 0);
         Assert.Equal(6, recovered.Fans.Count);
     }
@@ -109,8 +130,8 @@ public sealed class ResilienceTests : IDisposable
     public async Task First_tick_failure_publishes_a_minimal_state()
     {
         SeedValid();
-        var conflicts = new ThrowingConflicts(true);
-        Start(conflicts);
+        BrokenFan.ThrowOnRpm = new InvalidOperationException("engine bug");
+        Start(new FakeConflicts());
 
         var state = await WaitForState(_ => true);
 
@@ -119,8 +140,42 @@ public sealed class ResilienceTests : IDisposable
         var fault = Assert.Single(state.Faults);
         Assert.StartsWith("Engine tick failed", fault);
 
-        conflicts.Throwing = false;
+        BrokenFan.ThrowOnRpm = null;
         await WaitForState(s => s.Fans.Count == 6 && s.Faults.Count == 0);
+    }
+
+    [Fact]
+    public async Task Watchdog_fails_fast_when_a_tick_hangs()
+    {
+        SeedValid();
+        var failFast = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var conflicts = new BlockingConflicts();
+        Start(conflicts, new WatchdogOptions(TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100), m => failFast.TrySetResult(m)));
+        await WaitForState(s => s.Fans.Count == 6);
+
+        conflicts.Blocking = true;
+        try
+        {
+            var message = await failFast.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("airglow engine tick hung", message);
+        }
+        finally
+        {
+            conflicts.Release();
+        }
+    }
+
+    [Fact]
+    public async Task Watchdog_stays_quiet_while_ticks_complete()
+    {
+        SeedValid();
+        var calls = 0;
+        Start(new FakeConflicts(), new WatchdogOptions(TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100), _ => Interlocked.Increment(ref calls)));
+        await WaitForState(s => s.Fans.Count == 6);
+
+        await Task.Delay(2500);
+
+        Assert.Equal(0, Volatile.Read(ref calls));
     }
 
     [Fact]

@@ -5,6 +5,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Airglow.Service.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Airglow.Core\Airglow.Core.csproj" />
     <ProjectReference Include="..\Airglow.Hardware\Airglow.Hardware.csproj" />
   </ItemGroup>

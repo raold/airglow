@@ -186,6 +186,11 @@ p {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent);
 }
 
+.dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 22%, transparent);
+}
+
 .dot.bad {
   background: var(--bad);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 22%, transparent);

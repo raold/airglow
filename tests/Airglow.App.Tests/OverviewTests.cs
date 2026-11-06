@@ -12,14 +12,19 @@ namespace Airglow.App.Tests;
 
 public sealed class OverviewTests
 {
-    private sealed class FakeClient : IServiceClient
+    internal static readonly DateTimeOffset Now = new(2026, 11, 6, 12, 0, 0, TimeSpan.Zero);
+
+    internal sealed class FakeClient : IServiceClient
     {
         public EngineState? State { get; set; }
+
+        public AppConfig? Config { get; set; }
 
         public Task<EngineState> GetStateAsync(CancellationToken ct) =>
             State is { } state ? Task.FromResult(state) : throw new HttpRequestException("engine down");
 
-        public Task<AppConfig> GetConfigAsync(CancellationToken ct) => throw new NotSupportedException();
+        public Task<AppConfig> GetConfigAsync(CancellationToken ct) =>
+            Config is { } config ? Task.FromResult(config) : throw new NotSupportedException();
 
         public Task<IReadOnlyList<string>> SaveConfigAsync(AppConfig config, CancellationToken ct) =>
             throw new NotSupportedException();
@@ -34,15 +39,15 @@ public sealed class OverviewTests
     private static FanReading Fan(string id, string name, FanMode mode = FanMode.Curve, string? note = null) =>
         new(id, name, "cpu", 45, 45, 1020, mode, note);
 
-    private static EngineState StateOf(params FanReading[] fans) =>
-        new(DateTimeOffset.UnixEpoch,
+    internal static EngineState StateOf(params FanReading[] fans) =>
+        new(Now,
             [new TempReading("cpu.package", "CPU Package", 48.4), new TempReading("gpu.core", "GPU Core", 55)],
             fans,
             []);
 
-    private static async Task<(BunitContext Ctx, IRenderedComponent<Overview> Page)> RenderAsync(FakeClient client)
+    private static async Task<(BunitContext Ctx, IRenderedComponent<Overview> Page)> RenderAsync(FakeClient client, FakeTimeProvider? time = null)
     {
-        var live = new LiveState(client, new FakeTimeProvider());
+        var live = new LiveState(client, time ?? new FakeTimeProvider(Now));
         await live.RefreshAsync();
         var ctx = new BunitContext();
         ctx.Services.AddSingleton(live);
@@ -109,7 +114,32 @@ public sealed class OverviewTests
     }
 
     private static EngineState WithTemps(IEnumerable<TempReading> temps) =>
-        new(DateTimeOffset.UnixEpoch, temps.ToArray(), [Fan("f1", "Fan 1")], []);
+        new(Now, temps.ToArray(), [Fan("f1", "Fan 1")], []);
+
+    [Fact]
+    public async Task Fresh_state_shows_no_stale_banner()
+    {
+        var (ctx, page) = await RenderAsync(new FakeClient { State = StateOf(Fan("f1", "Fan 1")) });
+        using (ctx)
+        {
+            Assert.Empty(page.FindAll(".banner"));
+        }
+    }
+
+    [Fact]
+    public async Task Stale_state_shows_when_the_engine_last_updated()
+    {
+        var time = new FakeTimeProvider(Now);
+        var (ctx, page) = await RenderAsync(new FakeClient { State = StateOf(Fan("f1", "Fan 1")) }, time);
+        using (ctx)
+        {
+            time.Advance(TimeSpan.FromSeconds(4));
+            page.Render();
+
+            Assert.Equal($"The engine hasn't updated since {Now.ToLocalTime():HH:mm:ss}.", page.Find(".banner").TextContent.Trim());
+            Assert.Single(page.FindAll(".fan-card"));
+        }
+    }
 
     private static IEnumerable<TempReading> WellKnownTemps() =>
     [

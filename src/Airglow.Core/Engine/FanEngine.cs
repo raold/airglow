@@ -23,6 +23,8 @@ public sealed class FanEngine(
     private readonly Dictionary<string, Slot> _owners = [];
     private readonly Dictionary<string, int> _manual = [];
     private readonly Dictionary<string, long> _inputSeen = [];
+    private readonly HashSet<string> _loggedFaults = [];
+    private IReadOnlyDictionary<string, CurveResult> _lastResults = new Dictionary<string, CurveResult>();
     private Dictionary<string, FanOutputShaper> _shapers = [];
     private AppConfig? _config;
     private CurveSet? _curves;
@@ -96,14 +98,29 @@ public sealed class FanEngine(
                 throw new InvalidOperationException("ApplyConfig must be called before Tick.");
 
             var now = time.GetTimestamp();
-            CheckConflicts();
+            var faults = new List<string>();
+            try
+            {
+                CheckConflicts();
+            }
+            catch (Exception ex)
+            {
+                var fault = $"Conflict check failed: {ex.Message}";
+                Report(faults, fault, ex);
+                foreach (var slot in _slots)
+                {
+                    slot.Pause = fault;
+                    slot.Writes.Clear();
+                }
+            }
+
             foreach (var slot in _slots)
             {
-                if (slot.PausedBy is null)
+                if (slot.Pause is null)
                     slot.ClosedForPause = false;
                 if (!slot.ClosedForPause)
                     Connect(slot, config, now);
-                if (slot.PausedBy is not null && slot.Backend is { } backend)
+                if (slot.Pause is not null && slot.Backend is { } backend)
                     CloseIfSensorless(slot, backend, now);
             }
             foreach (var slot in _slots)
@@ -113,14 +130,48 @@ public sealed class FanEngine(
             foreach (var slot in Live)
                 foreach (var (id, celsius) in slot.Temperatures)
                     temperatures.TryAdd(id, celsius);
-            var results = curves.Evaluate(temperatures);
 
-            var plans = config.Fans.Select(fan => Decide(fan, results, config.Engine, now)).ToList();
+            IReadOnlyDictionary<string, CurveResult> results;
+            try
+            {
+                results = curves.Evaluate(temperatures);
+                _lastResults = results;
+            }
+            catch (Exception ex)
+            {
+                Report(faults, $"Curve evaluation failed: {ex.Message}", ex);
+                results = _lastResults.ToDictionary(r => r.Key, r => r.Value with { InputMissing = true });
+            }
+
+            var plans = new List<Plan>();
+            foreach (var fan in config.Fans)
+            {
+                try
+                {
+                    plans.Add(Decide(fan, results, config.Engine, now));
+                }
+                catch (Exception ex)
+                {
+                    var fault = $"{fan.Name}: {ex.Message}";
+                    Report(faults, fault, ex);
+                    Forget(fan);
+                    plans.Add(new Plan(fan, null, null, null, FanMode.Unavailable, null, false, fault));
+                }
+            }
             foreach (var plan in plans)
-                Send(plan, now);
+            {
+                try
+                {
+                    Send(plan, now);
+                }
+                catch (Exception ex)
+                {
+                    Report(faults, $"{plan.Fan.Name}: {ex.Message}", ex);
+                }
+            }
 
             var configured = config.Fans.Select(f => f.FanId).ToHashSet();
-            foreach (var slot in Live.Where(s => s.PausedBy is null).ToList())
+            foreach (var slot in Live.Where(s => s.Pause is null).ToList())
                 HandBackRemoved(slot, configured, config.Engine.ShutdownPercent, now);
 
             foreach (var slot in Live.Where(s => s.LoggedFault is not null))
@@ -128,8 +179,29 @@ public sealed class FanEngine(
                 log.LogInformation("{Backend} recovered", slot.Factory.Name);
                 slot.LoggedFault = null;
             }
+            foreach (var cleared in _loggedFaults.Where(f => !faults.Contains(f)).ToList())
+            {
+                log.LogInformation("Cleared: {Fault}", cleared);
+                _loggedFaults.Remove(cleared);
+            }
 
-            return Snapshot(temperatures, plans);
+            return Snapshot(temperatures, plans, faults);
+        }
+    }
+
+    public void EmergencyHandBack()
+    {
+        lock (_lock)
+        {
+            if (_stopped || _config is not { } config)
+                return;
+
+            foreach (var slot in Live.Where(s => s.Pause is null))
+            {
+                foreach (var channel in slot.Channels.Values)
+                    HandBack(channel, config.Engine.FailsafePercent);
+                slot.Writes.Clear();
+            }
         }
     }
 
@@ -154,7 +226,7 @@ public sealed class FanEngine(
             {
                 if (slot.Backend is not { } backend)
                     continue;
-                if (slot.PausedBy is null)
+                if (slot.Pause is null)
                     foreach (var channel in slot.Channels.Values)
                         HandBack(channel, _config!.Engine.ShutdownPercent);
                 slot.Backend = null;
@@ -215,10 +287,18 @@ public sealed class FanEngine(
         var running = conflicts.Running(_slots.SelectMany(s => s.Factory.ConflictingProcesses).Distinct());
         foreach (var slot in _slots)
         {
-            slot.PausedBy = slot.Factory.ConflictingProcesses.FirstOrDefault(running.Contains);
-            if (slot.PausedBy is not null)
+            var process = slot.Factory.ConflictingProcesses.FirstOrDefault(running.Contains);
+            slot.Pause = process is null ? null : $"{process} is running";
+            if (slot.Pause is not null)
                 slot.Writes.Clear();
         }
+    }
+
+    private void Report(List<string> faults, string fault, Exception error)
+    {
+        faults.Add(fault);
+        if (_loggedFaults.Add(fault))
+            log.LogWarning(error, "Engine fault: {Fault}", fault);
     }
 
     private Plan Decide(FanTarget fan, IReadOnlyDictionary<string, CurveResult> results, EngineSettings engine, long now)
@@ -233,10 +313,10 @@ public sealed class FanEngine(
             owner.Channels.TryGetValue(fan.FanId, out channel);
         var plan = new Plan(fan, owner, channel, result?.Percent, FanMode.Unavailable, null, false, owner?.Fault ?? "not found");
 
-        if (owner?.PausedBy is { } process)
+        if (owner?.Pause is { } reason)
         {
             Forget(fan);
-            return plan with { Mode = FanMode.Paused, Note = $"{process} is running" };
+            return plan with { Mode = FanMode.Paused, Note = reason };
         }
         if (channel is null)
         {
@@ -298,7 +378,7 @@ public sealed class FanEngine(
         }
     }
 
-    private EngineState Snapshot(Dictionary<string, double> temperatures, List<Plan> plans)
+    private EngineState Snapshot(Dictionary<string, double> temperatures, List<Plan> plans, List<string> engineFaults)
     {
         var temps = LiveSensors()
             .Select(s => new TempReading(s.Id, s.Name, temperatures.TryGetValue(s.Id, out var c) ? c : null))
@@ -311,7 +391,7 @@ public sealed class FanEngine(
             return new FanReading(p.Fan.FanId, p.Fan.Name, p.Fan.CurveId, p.CurvePercent, p.Command, p.Channel?.Rpm, p.Mode, p.Note);
         }).ToList();
 
-        var faults = _slots.Select(s => s.Fault).OfType<string>().ToList();
+        var faults = _slots.Select(s => s.Fault).OfType<string>().Concat(engineFaults).ToList();
         return new EngineState(time.GetUtcNow(), temps, fans, faults);
     }
 
@@ -349,7 +429,7 @@ public sealed class FanEngine(
             return;
         }
 
-        log.LogInformation("Closing {Backend} while {Process} is running", slot.Factory.Name, slot.PausedBy);
+        log.LogInformation("Closing {Backend} while paused: {Reason}", slot.Factory.Name, slot.Pause);
         slot.RetryFrom = null;
         slot.ClosedForPause = true;
         Drop(slot);
@@ -415,7 +495,7 @@ public sealed class FanEngine(
         }
         catch (Exception ex)
         {
-            log.LogWarning(ex, "Shutdown write to {Fan} failed", channel.Id);
+            log.LogWarning(ex, "Handing {Fan} back failed", channel.Id);
         }
     }
 
@@ -443,7 +523,7 @@ public sealed class FanEngine(
 
         public string? LoggedFault { get; set; }
 
-        public string? PausedBy { get; set; }
+        public string? Pause { get; set; }
 
         public bool ClosedForPause { get; set; }
 

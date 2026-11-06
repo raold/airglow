@@ -9,13 +9,23 @@ public sealed class FakeFanChannel(string id, string name, bool supportsAuto) : 
 
     public string Name => name;
 
-    public bool SupportsAuto => supportsAuto;
+    private int? _rpm;
 
-    public int? Rpm { get; set; }
+    public bool SupportsAuto => ThrowOnSupportsAuto is { } error ? throw error : supportsAuto;
+
+    public int? Rpm
+    {
+        get => ThrowOnRpm is { } error ? throw error : _rpm;
+        set => _rpm = value;
+    }
 
     public List<string> Calls { get; } = [];
 
     public Exception? ThrowOnWrite { get; set; }
+
+    public Exception? ThrowOnSupportsAuto { get; set; }
+
+    public Exception? ThrowOnRpm { get; set; }
 
     public void SetPercent(int percent) => Record($"SetPercent({percent})");
 
@@ -113,6 +123,10 @@ public sealed class FakeConflicts : IConflictDetector
 {
     public HashSet<string> RunningProcesses { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public Exception? ThrowOnCheck { get; set; }
+
     public IReadOnlySet<string> Running(IEnumerable<string> processNames) =>
-        processNames.Where(RunningProcesses.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        ThrowOnCheck is { } error
+            ? throw error
+            : processNames.Where(RunningProcesses.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase);
 }

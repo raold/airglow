@@ -19,7 +19,8 @@
         <div class="stat"><span class="stat-label">GPU core</span><span class="stat-value mono">@Temp("gpu.core")</span></div>
         <div class="stat">
             <span class="stat-label">Engine</span>
-            <span class="stat-value"><span class="dot @(Live.Connected ? "" : "bad")"></span>@(Live.Connected ? "Running" : "Not running")</span>
+            @{ var (status, dot) = Status(); }
+            <span class="stat-value" id="engine-status"><span class="dot @dot"></span>@status</span>
         </div>
     </div>
 </header>
@@ -37,6 +38,14 @@
     protected override void OnInitialized() => Live.Changed += OnChanged;
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private (string Text, string Dot) Status() => Live.Health switch
+    {
+        EngineHealth.Running => ("Running", "ok"),
+        EngineHealth.Faults => ("Faults", "warn"),
+        EngineHealth.Stalled => ("Stalled", "bad"),
+        _ => ("Not running", "bad"),
+    };
 
     private string Temp(string id) =>
         Live.Connected && Live.State?.Temperatures.FirstOrDefault(t => t.Id == id)?.Celsius is { } c

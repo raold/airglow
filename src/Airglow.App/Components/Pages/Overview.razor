@@ -11,6 +11,10 @@
 }
 else if (Live.State is { } state)
 {
+    @if (Live.Health == EngineHealth.Stalled)
+    {
+        <div class="banner bad" role="alert">The engine hasn't updated since @state.At.ToLocalTime().ToString("HH:mm:ss").</div>
+    }
     <section class="panel">
         <h2 class="panel-title">Fans</h2>
         <div class="fan-grid">
