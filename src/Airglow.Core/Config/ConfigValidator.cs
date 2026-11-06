@@ -21,10 +21,10 @@ public static class ConfigValidator
 
         if (config.Engine.TickMilliseconds is < 250 or > 5000)
             errors.Add("Engine: TickMilliseconds must be 250-5000");
-        if (config.Engine.FailsafePercent is < 0 or > 100)
-            errors.Add("Engine: FailsafePercent must be 0-100");
-        if (config.Engine.ShutdownPercent is < 0 or > 100)
-            errors.Add("Engine: ShutdownPercent must be 0-100");
+        if (config.Engine.FailsafePercent is < 50 or > 100)
+            errors.Add("Engine: FailsafePercent must be 50-100");
+        if (config.Engine.ShutdownPercent is < 30 or > 100)
+            errors.Add("Engine: ShutdownPercent must be 30-100");
         if (!(config.Engine.FailsafeAfterSeconds is >= 1 and <= 60))
             errors.Add("Engine: FailsafeAfterSeconds must be 1-60");
 
@@ -62,6 +62,8 @@ public static class ConfigValidator
                         errors.Add($"Curve '{m.Id}': missing curves");
                         break;
                     }
+                    if (m.CurveIds.Count == 0)
+                        errors.Add($"Curve '{m.Id}': mix needs at least one curve");
                     foreach (var member in m.CurveIds)
                         if (member is null || !byId.ContainsKey(member))
                             errors.Add($"Curve '{m.Id}': unknown curve '{member}' in mix");
@@ -129,6 +131,12 @@ public static class ConfigValidator
 
     private static void ValidateGraph(GraphCurve g, List<string> errors)
     {
+        if (string.IsNullOrWhiteSpace(g.SensorId))
+            errors.Add($"Curve '{g.Id}': needs a sensor");
+        if (g.Hysteresis is { } h
+            && !(Within(h.UpCelsius, 20) && Within(h.DownCelsius, 20)
+                && Within(h.ResponseUpSeconds, 60) && Within(h.ResponseDownSeconds, 60)))
+            errors.Add($"Curve '{g.Id}': hysteresis must be 0-20 °C and 0-60 s");
         if (g.Points is null)
         {
             errors.Add($"Curve '{g.Id}': missing points");
@@ -152,6 +160,8 @@ public static class ConfigValidator
         if (g.Points.Any(p => p.Celsius is < 0 or > 120 || p.Percent is < 0 or > 100))
             errors.Add($"Curve '{g.Id}': points must be within 0-120 °C and 0-100 %");
     }
+
+    private static bool Within(double value, double max) => double.IsFinite(value) && value >= 0 && value <= max;
 
     private static bool ReachesItself(MixCurve start, Dictionary<string, FanCurve> byId)
     {

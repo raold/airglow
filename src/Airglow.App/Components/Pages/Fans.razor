@@ -91,13 +91,13 @@ else
                                         }
                                     </select>
                                     <label for="hyst-up">Rise delta °C</label>
-                                    <input id="hyst-up" type="number" step="0.5" min="0" value="@graph.Hysteresis.UpCelsius" @onchange="e => UpdateHysteresis(h => h with { UpCelsius = Num(e, h.UpCelsius) })" />
+                                    <input id="hyst-up" type="number" step="0.5" min="0" max="20" value="@graph.Hysteresis.UpCelsius" @onchange="e => UpdateHysteresis(h => h with { UpCelsius = Num(e, h.UpCelsius) })" />
                                     <label for="hyst-down">Fall delta °C</label>
-                                    <input id="hyst-down" type="number" step="0.5" min="0" value="@graph.Hysteresis.DownCelsius" @onchange="e => UpdateHysteresis(h => h with { DownCelsius = Num(e, h.DownCelsius) })" />
+                                    <input id="hyst-down" type="number" step="0.5" min="0" max="20" value="@graph.Hysteresis.DownCelsius" @onchange="e => UpdateHysteresis(h => h with { DownCelsius = Num(e, h.DownCelsius) })" />
                                     <label for="hyst-resp-up">Response up (s)</label>
-                                    <input id="hyst-resp-up" type="number" step="0.5" min="0" value="@graph.Hysteresis.ResponseUpSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseUpSeconds = Num(e, h.ResponseUpSeconds) })" />
+                                    <input id="hyst-resp-up" type="number" step="0.5" min="0" max="60" value="@graph.Hysteresis.ResponseUpSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseUpSeconds = Num(e, h.ResponseUpSeconds) })" />
                                     <label for="hyst-resp-down">Response down (s)</label>
-                                    <input id="hyst-resp-down" type="number" step="0.5" min="0" value="@graph.Hysteresis.ResponseDownSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseDownSeconds = Num(e, h.ResponseDownSeconds) })" />
+                                    <input id="hyst-resp-down" type="number" step="0.5" min="0" max="60" value="@graph.Hysteresis.ResponseDownSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseDownSeconds = Num(e, h.ResponseDownSeconds) })" />
                                     <label for="hyst-limits">Ignore at limits</label>
                                     <input id="hyst-limits" type="checkbox" checked="@graph.Hysteresis.IgnoreAtLimits" @onchange="e => UpdateHysteresis(h => h with { IgnoreAtLimits = (bool)(e.Value ?? false) })" />
                                 </div>

@@ -85,9 +85,76 @@ public sealed class ConfigTests : IDisposable
         Assert.Contains("Fan 'gpu.fan1': StopBelowPercent must be 0-100", errors);
         Assert.Contains("Duplicate fan id 'gpu.fan1'", errors);
         Assert.Contains("Fan 'gpu.fan1': needs a curve or a manual percent", errors);
-        Assert.Contains("Engine: FailsafePercent must be 0-100", errors);
-        Assert.Contains("Engine: ShutdownPercent must be 0-100", errors);
+        Assert.Contains("Engine: FailsafePercent must be 50-100", errors);
+        Assert.Contains("Engine: ShutdownPercent must be 30-100", errors);
         Assert.Contains("Engine: FailsafeAfterSeconds must be 1-60", errors);
+    }
+
+    [Theory]
+    [InlineData(49, 60, "Engine: FailsafePercent must be 50-100")]
+    [InlineData(100, 29, "Engine: ShutdownPercent must be 30-100")]
+    public void Rejects_low_failsafe_and_shutdown_percent(int failsafe, int shutdown, string expected)
+    {
+        var c = AppConfig.CreateDefault();
+        var errors = ConfigValidator.Validate(c with { Engine = c.Engine with { FailsafePercent = failsafe, ShutdownPercent = shutdown } });
+        Assert.Equal([expected], errors);
+    }
+
+    [Fact]
+    public void Accepts_lowest_failsafe_and_shutdown_percent()
+    {
+        var c = AppConfig.CreateDefault();
+        Assert.Empty(ConfigValidator.Validate(c with { Engine = c.Engine with { FailsafePercent = 50, ShutdownPercent = 30 } }));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void Rejects_graph_curve_without_sensor(string? sensor)
+    {
+        var c = AppConfig.CreateDefault();
+        var curves = c.Curves.Select(x => x is GraphCurve { Id: "gpu" } g ? g with { SensorId = sensor! } : x).ToList();
+        Assert.Equal(["Curve 'gpu': needs a sensor"], ConfigValidator.Validate(With(c, curves)));
+    }
+
+    public static TheoryData<HysteresisSettings> BadHysteresis => new()
+    {
+        new HysteresisSettings(UpCelsius: -0.5),
+        new HysteresisSettings(UpCelsius: 20.5),
+        new HysteresisSettings(DownCelsius: double.NaN),
+        new HysteresisSettings(DownCelsius: double.PositiveInfinity),
+        new HysteresisSettings(ResponseUpSeconds: -1),
+        new HysteresisSettings(ResponseUpSeconds: 61),
+        new HysteresisSettings(ResponseDownSeconds: double.NaN),
+        new HysteresisSettings(ResponseDownSeconds: 60.5),
+    };
+
+    [Theory]
+    [MemberData(nameof(BadHysteresis))]
+    public void Rejects_out_of_range_hysteresis(HysteresisSettings hysteresis)
+    {
+        var c = AppConfig.CreateDefault();
+        var curves = c.Curves.Select(x => x is GraphCurve { Id: "gpu" } g ? g with { Hysteresis = hysteresis } : x).ToList();
+        Assert.Equal(["Curve 'gpu': hysteresis must be 0-20 °C and 0-60 s"], ConfigValidator.Validate(With(c, curves)));
+    }
+
+    [Fact]
+    public void Accepts_hysteresis_at_its_limits()
+    {
+        var c = AppConfig.CreateDefault();
+        var curves = c.Curves.Select(x => x is GraphCurve { Id: "gpu" } g
+            ? g with { Hysteresis = new HysteresisSettings(0, 20, 0, 60) }
+            : x).ToList();
+        Assert.Empty(ConfigValidator.Validate(With(c, curves)));
+    }
+
+    [Fact]
+    public void Rejects_empty_mix()
+    {
+        var c = AppConfig.CreateDefault();
+        var errors = ConfigValidator.Validate(With(c, [.. c.Curves, new MixCurve("m", "M", MixFunction.Max, [])]));
+        Assert.Equal(["Curve 'm': mix needs at least one curve"], errors);
     }
 
     [Fact]

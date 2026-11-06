@@ -193,6 +193,22 @@ public sealed class FansPageTests
     }
 
     [Fact]
+    public void Number_inputs_match_the_validator_ranges()
+    {
+        using var ctx = NewContext(new FakeClient());
+        var fans = ctx.Render<Fans>();
+        var settings = ctx.Render<Settings>();
+
+        foreach (var (id, max) in new[] { ("#hyst-up", "20"), ("#hyst-down", "20"), ("#hyst-resp-up", "60"), ("#hyst-resp-down", "60") })
+        {
+            Assert.Equal("0", fans.Find(id).GetAttribute("min"));
+            Assert.Equal(max, fans.Find(id).GetAttribute("max"));
+        }
+        Assert.Equal("50", settings.Find("#failsafe-percent").GetAttribute("min"));
+        Assert.Equal("30", settings.Find("#shutdown-percent").GetAttribute("min"));
+    }
+
+    [Fact]
     public async Task Load_failure_shows_retry_that_loads_the_page()
     {
         var client = new FakeClient { FailLoad = true };
