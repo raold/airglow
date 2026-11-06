@@ -48,7 +48,9 @@ Plan 1: [`docs/superpowers/plans/2026-11-06-airglow-fans.md`](docs/superpowers/p
 1. Download `airglow-<version>-x64.msi` from the
    [Releases](https://github.com/raold/airglow/releases) page.
 2. Run it. The installer is unsigned, so SmartScreen shows "Windows protected your PC": click
-   "More info", then "Run anyway".
+   "More info", then "Run anyway". If Smart App Control is on, it blocks unsigned installers
+   outright and offers no "Run anyway".
+3. Open airglow from the Start menu. Otherwise the tray app first starts at your next sign-in.
 
 It installs to `C:\Program Files\Airglow`, adds the `Airglow` service (starts at boot, restarts
 itself on failure) and a Start menu shortcut, and starts the tray app at sign-in. The .NET runtime
@@ -63,7 +65,7 @@ fans that app owns alone (shown as Paused).
 
 ### Moving from the scripts
 
-If you installed with the plan 1 scripts:
+If you installed with the earlier install scripts:
 
 1. Run `scripts\uninstall-service.ps1` as admin.
 2. Delete `C:\Program Files\Airglow\App`.
@@ -74,7 +76,7 @@ If you installed with the plan 1 scripts:
 
 ### Uninstall
 
-Settings, Apps, airglow. Your config stays in `%ProgramData%\Airglow`.
+Uninstall from `Settings > Apps > Installed apps > airglow`. Your config stays in `%ProgramData%\Airglow`.
 
 ## Building
 
