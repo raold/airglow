@@ -22,6 +22,7 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        RestartRegistration.Register();
         _instance.ShowRequested += () => Dispatcher.BeginInvoke(ShowWindow);
 
         var services = new ServiceCollection();
