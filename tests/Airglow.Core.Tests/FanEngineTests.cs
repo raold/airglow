@@ -99,21 +99,146 @@ public class FanEngineTests
     [Fact]
     public void Paused_when_conflicting_process_running()
     {
+        _engine.Tick();
         _conflicts.RunningProcesses.Add("FanControl");
+        _time.Advance(TimeSpan.FromSeconds(FanEngine.ResendSeconds));
 
         var state = _engine.Tick();
 
         foreach (var id in GpuFans)
         {
-            Assert.Empty(Fan(id).Calls);
+            Assert.Equal(["SetPercent(50)"], Fan(id).Calls);
             Assert.Equal(FanMode.Paused, Reading(state, id).Mode);
             Assert.Equal("FanControl is running", Reading(state, id).Note);
         }
         foreach (var id in LianLiFans)
         {
-            Assert.NotEmpty(Fan(id).Calls);
+            Assert.Equal(2, Fan(id).Calls.Count);
             Assert.Equal(FanMode.Curve, Reading(state, id).Mode);
         }
+    }
+
+    [Fact]
+    public void Paused_sensor_backend_keeps_feeding_curves()
+    {
+        _engine.Tick();
+        _conflicts.RunningProcesses.Add("FanControl");
+        _gpu.Backend.Temperatures["cpu.package"] = 61;
+
+        Next();
+        var state = Next();
+
+        Assert.False(_gpu.Backend.Disposed);
+        Assert.Equal(3, _gpu.Backend.Updates);
+        Assert.Equal(1, _gpu.Creates);
+        Assert.Equal(["SetPercent(50)"], Fan("gpu.fan1").Calls);
+        Assert.Contains(state.Temperatures, t => t.Id == "cpu.package" && t.Celsius == 61);
+        Assert.Equal("SetPercent(74)", Fan("lianli.g1").Calls[^1]);
+    }
+
+    [Fact]
+    public void Hub_is_not_opened_while_its_app_runs()
+    {
+        _conflicts.RunningProcesses.Add("L-Connect 3");
+
+        _engine.Tick();
+        for (var second = 1; second <= 6; second++)
+            Next();
+
+        Assert.Equal(0, _lianli.Creates);
+        Assert.Equal(0, _lianli.Backend.Updates);
+        Assert.All(LianLiFans, id => Assert.Empty(Fan(id).Calls));
+        Assert.Equal("SetPercent(50)", Fan("gpu.fan1").Calls[^1]);
+    }
+
+    [Fact]
+    public void Hub_is_closed_while_its_app_runs_and_reopened_after()
+    {
+        Fan("lianli.g1").Rpm = 900;
+        Assert.Equal(900, Reading(_engine.Tick(), "lianli.g1").Rpm);
+
+        _conflicts.RunningProcesses.Add("L-Connect 3");
+        var paused = Next();
+        Next();
+
+        Assert.True(_lianli.Backend.Disposed);
+        Assert.Equal(1, _lianli.Backend.Updates);
+        Assert.Equal(1, _lianli.Creates);
+        foreach (var id in LianLiFans)
+        {
+            Assert.Single(Fan(id).Calls);
+            Assert.Equal(FanMode.Paused, Reading(paused, id).Mode);
+            Assert.Equal("L-Connect 3 is running", Reading(paused, id).Note);
+            Assert.Null(Reading(paused, id).Rpm);
+        }
+
+        _conflicts.RunningProcesses.Clear();
+        var resumed = Next();
+
+        Assert.Equal(2, _lianli.Creates);
+        Assert.False(_lianli.Backend.Disposed);
+        foreach (var id in LianLiFans)
+        {
+            Assert.Equal(2, Fan(id).Calls.Count);
+            Assert.Equal(FanMode.Curve, Reading(resumed, id).Mode);
+        }
+    }
+
+    [Fact]
+    public void Resume_after_pause_is_not_step_limited()
+    {
+        GpuCore = 30;
+        _engine.Tick();
+        _conflicts.RunningProcesses.Add("FanControl");
+        GpuCore = 80;
+        Next();
+        Next();
+
+        _conflicts.RunningProcesses.Clear();
+        Next();
+
+        Assert.Equal(["SetAuto()", "SetPercent(100)"], Fan("gpu.fan1").Calls);
+    }
+
+    [Fact]
+    public void Reconnect_after_fault_is_not_step_limited()
+    {
+        GpuCore = 30;
+        _engine.Tick();
+        _gpu.Backend.ThrowOnUpdate = new IOException("gone");
+        Next();
+        _gpu.Backend.ThrowOnUpdate = null;
+        GpuCore = 81;
+
+        for (var second = 1; second <= 5; second++)
+            Next();
+
+        Assert.Equal(2, _gpu.Creates);
+        Assert.Equal(["SetAuto()", "SetPercent(100)"], Fan("gpu.fan1").Calls);
+    }
+
+    [Fact]
+    public void Removed_fans_are_handed_back_once()
+    {
+        _engine.Tick();
+        _engine.ApplyConfig(_config with
+        {
+            Fans = _config.Fans.Where(f => f.FanId is not ("gpu.fan2" or "lianli.g4")).ToList(),
+        });
+
+        var state = Next();
+
+        Assert.Equal(["SetPercent(50)", "SetAuto()"], Fan("gpu.fan2").Calls);
+        Assert.Equal("SetPercent(60)", Fan("lianli.g4").Calls[^1]);
+        Assert.Equal(2, Fan("lianli.g4").Calls.Count);
+        Assert.DoesNotContain(state.Fans, f => f.Id is "gpu.fan2" or "lianli.g4");
+
+        for (var second = 1; second <= FanEngine.ResendSeconds + 2; second++)
+            Next();
+
+        Assert.Equal(2, Fan("gpu.fan2").Calls.Count);
+        Assert.Equal(2, Fan("lianli.g4").Calls.Count);
+        Assert.True(Fan("gpu.fan1").Calls.Count > 1);
     }
 
     [Fact]

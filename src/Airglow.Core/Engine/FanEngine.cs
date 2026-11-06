@@ -92,8 +92,14 @@ public sealed class FanEngine(
                 throw new InvalidOperationException("ApplyConfig must be called before Tick.");
 
             var now = time.GetTimestamp();
+            CheckConflicts();
             foreach (var slot in _slots)
-                Connect(slot, config, now);
+            {
+                if (slot.PausedBy is null)
+                    Connect(slot, config, now);
+                else if (slot.Backend is not null && slot.Sensors.Count == 0)
+                    ClosePaused(slot);
+            }
             foreach (var slot in _slots)
                 Refresh(slot, now);
 
@@ -102,11 +108,14 @@ public sealed class FanEngine(
                 foreach (var (id, celsius) in slot.Temperatures)
                     temperatures.TryAdd(id, celsius);
             var results = curves.Evaluate(temperatures);
-            CheckConflicts();
 
             var plans = config.Fans.Select(fan => Decide(fan, results, config.Engine, now)).ToList();
             foreach (var plan in plans)
                 Send(plan, now);
+
+            var configured = config.Fans.Select(f => f.FanId).ToHashSet();
+            foreach (var slot in Live.Where(s => s.PausedBy is null).ToList())
+                HandBackRemoved(slot, configured, config.Engine.ShutdownPercent, now);
 
             foreach (var slot in Live.Where(s => s.LoggedFault is not null))
             {
@@ -219,9 +228,15 @@ public sealed class FanEngine(
         var plan = new Plan(fan, owner, channel, result?.Percent, FanMode.Unavailable, null, false, owner?.Fault ?? "not found");
 
         if (owner?.PausedBy is { } process)
+        {
+            Forget(fan);
             return plan with { Mode = FanMode.Paused, Note = $"{process} is running" };
+        }
         if (channel is null)
+        {
+            Forget(fan);
             return plan;
+        }
 
         var shaper = _shapers[fan.FanId];
         var missingFor = time.GetElapsedTime(_inputSeen.GetValueOrDefault(fan.FanId, _firstApplied), now);
@@ -305,8 +320,23 @@ public sealed class FanEngine(
             slot.LoggedFault = fault;
         }
 
+        foreach (var fan in _config?.Fans ?? [])
+            if (slot.Channels.ContainsKey(fan.FanId))
+                Forget(fan);
         slot.Fault = fault;
         slot.RetryFrom = now;
+        Drop(slot);
+    }
+
+    private void ClosePaused(Slot slot)
+    {
+        log.LogInformation("Closing {Backend} while {Process} is running", slot.Factory.Name, slot.PausedBy);
+        slot.RetryFrom = null;
+        Drop(slot);
+    }
+
+    private void Drop(Slot slot)
+    {
         slot.Channels = [];
         slot.Sensors = [];
         slot.Temperatures = new Dictionary<string, double>();
@@ -315,6 +345,30 @@ public sealed class FanEngine(
         {
             slot.Backend = null;
             Close(slot, backend);
+        }
+    }
+
+    private void Forget(FanTarget fan) => _shapers[fan.FanId] = new FanOutputShaper(fan);
+
+    private void HandBackRemoved(Slot slot, HashSet<string> configured, int percent, long now)
+    {
+        foreach (var id in slot.Writes.Keys.Where(id => !configured.Contains(id)).ToList())
+        {
+            slot.Writes.Remove(id);
+            if (!slot.Channels.TryGetValue(id, out var channel))
+                continue;
+            try
+            {
+                if (channel.SupportsAuto)
+                    channel.SetAuto();
+                else
+                    channel.SetPercent(percent);
+            }
+            catch (Exception ex)
+            {
+                Fail(slot, ex, now);
+                return;
+            }
         }
     }
 
