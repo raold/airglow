@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         WebView.Services = services;
+        System.Windows.Application.Current.SessionEnding += (_, _) => _allowClose = true;
     }
 
     public void AllowClose() => _allowClose = true;

@@ -14,9 +14,11 @@ public sealed class LiveState : IDisposable
         _loop = Task.Run(() => PollAsync(time));
     }
 
-    public EngineState? State { get; private set; }
+    private volatile Snapshot _snapshot = new(null, false);
 
-    public bool Connected { get; private set; }
+    public EngineState? State => _snapshot.State;
+
+    public bool Connected => _snapshot.Connected;
 
     public event Action? Changed;
 
@@ -24,16 +26,26 @@ public sealed class LiveState : IDisposable
     {
         try
         {
-            State = await _client.GetStateAsync(_cts.Token);
-            Connected = true;
+            _snapshot = new Snapshot(await _client.GetStateAsync(_cts.Token), true);
         }
         catch (Exception) when (!_cts.IsCancellationRequested)
         {
-            Connected = false;
+            _snapshot = new Snapshot(_snapshot.State, false);
         }
 
-        if (!_cts.IsCancellationRequested)
-            Changed?.Invoke();
+        if (_cts.IsCancellationRequested)
+            return;
+        foreach (var handler in (Changed?.GetInvocationList() ?? []).Cast<Action>())
+        {
+            try
+            {
+                handler();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LiveState subscriber failed: {ex}");
+            }
+        }
     }
 
     private async Task PollAsync(TimeProvider time)
@@ -61,6 +73,9 @@ public sealed class LiveState : IDisposable
         {
         }
 
-        _cts.Dispose();
+        if (_loop.IsCompleted)
+            _cts.Dispose();
     }
+
+    private sealed record Snapshot(EngineState? State, bool Connected);
 }

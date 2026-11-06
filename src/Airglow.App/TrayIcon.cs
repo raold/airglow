@@ -11,6 +11,7 @@ public sealed class TrayIcon : IDisposable
     private readonly LiveState _live;
     private readonly NotifyIcon _icon;
     private readonly Icon _glyph;
+    private bool _disposed;
 
     public TrayIcon(LiveState live, Action open, Action quit)
     {
@@ -37,8 +38,11 @@ public sealed class TrayIcon : IDisposable
     private void OnChanged()
     {
         var text = Tooltip(_live);
-        if (text != _icon.Text)
-            _icon.Text = text;
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            if (!_disposed && text != _icon.Text)
+                _icon.Text = text;
+        });
     }
 
     private static Icon DrawGlyph()
@@ -80,6 +84,7 @@ public sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _live.Changed -= OnChanged;
         _icon.Visible = false;
         _icon.Dispose();

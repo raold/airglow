@@ -86,4 +86,25 @@ public sealed class OverviewTests
             Assert.Empty(page.FindAll(".fan-card"));
         }
     }
+
+    [Fact]
+    public async Task Throwing_subscriber_does_not_stop_polling()
+    {
+        var time = new FakeTimeProvider();
+        var client = new FakeClient { State = StateOf() };
+        using var live = new LiveState(client, time);
+        var calls = 0;
+        live.Changed += () =>
+        {
+            Interlocked.Increment(ref calls);
+            throw new InvalidOperationException("bad handler");
+        };
+
+        await live.RefreshAsync();
+        var before = Volatile.Read(ref calls);
+        await live.RefreshAsync();
+
+        Assert.True(Volatile.Read(ref calls) > before);
+        Assert.True(live.Connected);
+    }
 }

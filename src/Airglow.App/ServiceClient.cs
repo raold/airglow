@@ -31,6 +31,7 @@ public sealed class ServiceClient : IServiceClient, IDisposable
     {
         var handler = new SocketsHttpHandler
         {
+            UseProxy = false,
             ConnectCallback = async (_, ct) =>
             {
                 var pipe = new NamedPipeClientStream(".", AirglowPaths.PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
