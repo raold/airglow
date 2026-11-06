@@ -20,4 +20,8 @@
     <ProjectReference Include="..\..\src\Airglow.Core\Airglow.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Shared\Fakes.cs" Link="Fakes.cs" />
+  </ItemGroup>
+
 </Project>
