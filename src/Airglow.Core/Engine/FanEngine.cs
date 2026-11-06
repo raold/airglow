@@ -96,9 +96,11 @@ public sealed class FanEngine(
             foreach (var slot in _slots)
             {
                 if (slot.PausedBy is null)
+                    slot.ClosedForPause = false;
+                if (!slot.ClosedForPause)
                     Connect(slot, config, now);
-                else if (slot.Backend is not null && slot.Sensors.Count == 0)
-                    ClosePaused(slot);
+                if (slot.PausedBy is not null && slot.Backend is { } backend)
+                    CloseIfSensorless(slot, backend, now);
             }
             foreach (var slot in _slots)
                 Refresh(slot, now);
@@ -328,10 +330,24 @@ public sealed class FanEngine(
         Drop(slot);
     }
 
-    private void ClosePaused(Slot slot)
+    private void CloseIfSensorless(Slot slot, IHardwareBackend backend, long now)
     {
+        try
+        {
+            foreach (var fan in backend.Fans)
+                _owners[fan.Id] = slot;
+            if (backend.Sensors.Count > 0)
+                return;
+        }
+        catch (Exception ex)
+        {
+            Fail(slot, ex, now);
+            return;
+        }
+
         log.LogInformation("Closing {Backend} while {Process} is running", slot.Factory.Name, slot.PausedBy);
         slot.RetryFrom = null;
+        slot.ClosedForPause = true;
         Drop(slot);
     }
 
@@ -424,6 +440,8 @@ public sealed class FanEngine(
         public string? LoggedFault { get; set; }
 
         public string? PausedBy { get; set; }
+
+        public bool ClosedForPause { get; set; }
 
         public Dictionary<string, IFanChannel> Channels { get; set; } = [];
 

@@ -99,6 +99,26 @@ public class FanEngineTests
     [Fact]
     public void Paused_when_conflicting_process_running()
     {
+        _conflicts.RunningProcesses.Add("FanControl");
+
+        var state = _engine.Tick();
+
+        foreach (var id in GpuFans)
+        {
+            Assert.Empty(Fan(id).Calls);
+            Assert.Equal(FanMode.Paused, Reading(state, id).Mode);
+            Assert.Equal("FanControl is running", Reading(state, id).Note);
+        }
+        foreach (var id in LianLiFans)
+        {
+            Assert.NotEmpty(Fan(id).Calls);
+            Assert.Equal(FanMode.Curve, Reading(state, id).Mode);
+        }
+    }
+
+    [Fact]
+    public void Paused_when_conflicting_process_starts_mid_run()
+    {
         _engine.Tick();
         _conflicts.RunningProcesses.Add("FanControl");
         _time.Advance(TimeSpan.FromSeconds(FanEngine.ResendSeconds));
@@ -137,18 +157,47 @@ public class FanEngineTests
     }
 
     [Fact]
-    public void Hub_is_not_opened_while_its_app_runs()
+    public void Hub_is_opened_once_and_closed_when_its_app_runs_at_startup()
     {
         _conflicts.RunningProcesses.Add("L-Connect 3");
 
-        _engine.Tick();
-        for (var second = 1; second <= 6; second++)
-            Next();
+        var state = _engine.Tick();
+        for (var second = 1; second <= FanEngine.RetrySeconds + 1; second++)
+            state = Next();
 
-        Assert.Equal(0, _lianli.Creates);
+        Assert.Equal(1, _lianli.Creates);
+        Assert.True(_lianli.Backend.Disposed);
         Assert.Equal(0, _lianli.Backend.Updates);
-        Assert.All(LianLiFans, id => Assert.Empty(Fan(id).Calls));
+        foreach (var id in LianLiFans)
+        {
+            Assert.Empty(Fan(id).Calls);
+            Assert.Equal(FanMode.Paused, Reading(state, id).Mode);
+            Assert.Equal("L-Connect 3 is running", Reading(state, id).Note);
+        }
+        Assert.All(GpuFans, id => Assert.Equal(FanMode.Curve, Reading(state, id).Mode));
         Assert.Equal("SetPercent(50)", Fan("gpu.fan1").Calls[^1]);
+
+        _conflicts.RunningProcesses.Clear();
+        var resumed = Next();
+
+        Assert.Equal(2, _lianli.Creates);
+        Assert.All(LianLiFans, id => Assert.Single(Fan(id).Calls));
+        Assert.All(LianLiFans, id => Assert.Equal(FanMode.Curve, Reading(resumed, id).Mode));
+    }
+
+    [Fact]
+    public void Both_apps_running_at_startup_pause_every_fan()
+    {
+        _conflicts.RunningProcesses.UnionWith(["FanControl", "L-Connect 3"]);
+
+        var state = _engine.Tick();
+        for (var second = 1; second <= FanEngine.ResendSeconds + 1; second++)
+            state = Next();
+
+        Assert.Equal(6, state.Fans.Count);
+        Assert.All(state.Fans, f => Assert.Equal(FanMode.Paused, f.Mode));
+        Assert.All(GpuFans.Concat(LianLiFans), id => Assert.Empty(Fan(id).Calls));
+        Assert.Empty(state.Faults);
     }
 
     [Fact]
