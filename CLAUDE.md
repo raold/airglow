@@ -24,6 +24,8 @@ Read the design and the current plan before changing anything:
 dotnet build Airglow.slnx
 dotnet test Airglow.slnx
 gsudo dotnet run --project src/Airglow.Probe -c Release   # read-only hardware report, needs admin
+pwsh scripts/build-msi.ps1 -Version 0.1.0   # artifacts/airglow-0.1.0-x64.msi
+# tag vX.Y.Z to release (the release workflow builds and attaches the MSI)
 ```
 
 Use `gsudo <command>` for anything that needs admin (probe, service install, cut-over).

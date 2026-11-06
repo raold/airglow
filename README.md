@@ -4,8 +4,8 @@ Fan control and lighting for one Windows PC, in one C# app. It replaces three to
 did part of the job: FanControl (GPU fans), Lian Li L-Connect 3 (case fans and their lighting) and
 OpenRGB (everything else that lights up).
 
-> **Status:** early. The design and the first plan (engine, fans and app) are written; the code is
-> being built task by task. Lighting comes in a second plan.
+> **Status:** fan control is live: the Lian Li UNI HUB AL groups and both RTX 4090 fans. Lighting
+> is the second plan and not done yet; until then L-Connect 3 or OpenRGB still handle lighting.
 
 ## What it controls
 
@@ -43,6 +43,39 @@ It is built for this exact machine. Other hardware is out of scope.
 Design: [`docs/superpowers/specs/2026-11-06-airglow-design.md`](docs/superpowers/specs/2026-11-06-airglow-design.md)
 Plan 1: [`docs/superpowers/plans/2026-11-06-airglow-fans.md`](docs/superpowers/plans/2026-11-06-airglow-fans.md)
 
+## Install
+
+1. Download `airglow-<version>-x64.msi` from the
+   [Releases](https://github.com/raold/airglow/releases) page.
+2. Run it. The installer is unsigned, so SmartScreen shows "Windows protected your PC": click
+   "More info", then "Run anyway".
+
+It installs to `C:\Program Files\Airglow`, adds the `Airglow` service (starts at boot, restarts
+itself on failure) and a Start menu shortcut, and starts the tray app at sign-in. The .NET runtime
+is bundled.
+
+CPU temperatures need the PawnIO driver. OpenRGB and FanControl often install it; keep it if you
+uninstall those, otherwise get it from [pawnio.eu](https://pawnio.eu). Without it the app shows a
+hint, and curves on CPU sensors go to the failsafe speed.
+
+FanControl and L-Connect 3 must not run alongside airglow. While either runs, airglow leaves the
+fans that app owns alone (shown as Paused).
+
+### Moving from the scripts
+
+If you installed with the plan 1 scripts:
+
+1. Run `scripts\uninstall-service.ps1` as admin.
+2. Delete `C:\Program Files\Airglow\App`.
+3. Remove the `airglow` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
+4. Install the MSI.
+
+`scripts\rollback.ps1` still restores FanControl and L-Connect 3.
+
+### Uninstall
+
+Settings, Apps, airglow. Your config stays in `%ProgramData%\Airglow`.
+
 ## Building
 
 Needs Windows 11 and the .NET 10 SDK.
@@ -50,13 +83,18 @@ Needs Windows 11 and the .NET 10 SDK.
 ```bash
 dotnet build Airglow.slnx
 dotnet test Airglow.slnx
+pwsh scripts/build-msi.ps1 -Version 0.1.0   # artifacts/airglow-0.1.0-x64.msi
 ```
 
-Reading CPU temperatures, installing the service and switching over from the old apps need an
-admin shell. The `scripts/` folder will hold the install, cut-over and rollback scripts.
+Reading CPU temperatures and installing the service need an admin shell.
 
-`scripts/white.py` is a stopgap from before airglow: it sets every light to static white through
-OpenRGB (`uv run scripts/white.py`).
+To release, push a tag `vX.Y.Z`. The release workflow runs the tests, builds the MSI and attaches it
+to a GitHub Release. An optional signing step stays off until signing secrets are configured.
+
+## Lighting
+
+Until lighting lands, `scripts/white.py` sets every light to static white through OpenRGB
+(`uv run scripts/white.py`).
 
 ## Credits
 
