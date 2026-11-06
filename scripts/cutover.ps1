@@ -71,6 +71,17 @@ function Test-Preflight {
     if (-not $openRgb) { Write-Host 'NOTE    task \OpenRGB not found' }
     elseif ($openRgb.State -eq 'Disabled') { Write-Host 'OK      task \OpenRGB is disabled' }
     else { Write-Host "WARN    task \OpenRGB is $($openRgb.State), not Disabled (left unchanged)" }
+    try {
+        $config = Get-AirglowApi -Path '/api/config'
+        $counts = @($config.lianLiGroups | ForEach-Object { [int]$_.fanCount })
+        if ($counts.Count -gt 0 -and @($counts | Where-Object { $_ -ne 3 }).Count -eq 0) {
+            Write-Host 'WARN    Lian Li fan counts are still the defaults (3/3/3/3); set the real counts in airglow Settings before -Go.'
+        }
+        else { Write-Host "OK      Lian Li fan counts $($counts -join '/')" }
+    }
+    catch {
+        Write-Host "WARN    couldn't check the Lian Li fan counts (airglow pipe not reachable: $($_.Exception.Message)); check them in airglow Settings before -Go."
+    }
     $script:missing -eq 0
 }
 

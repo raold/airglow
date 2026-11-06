@@ -54,6 +54,11 @@ Invoke-Step 'stop service Airglow (stays installed; it pauses itself while the o
     if (-not $service) { Write-Host '  skipped: service Airglow not found'; return }
     if ($service.Status -ne 'Stopped') { Stop-Service -Name Airglow -Force }
 }
+Invoke-Step 'set service Airglow to manual start (sc.exe config Airglow start= demand) so a reboot keeps it stopped' {
+    if (-not (Get-Service -Name Airglow -ErrorAction SilentlyContinue)) { Write-Host '  skipped: service Airglow not found'; return }
+    sc.exe config Airglow start= demand
+    if ($LASTEXITCODE -ne 0) { throw "sc.exe config failed (exit $LASTEXITCODE)." }
+}
 Invoke-Step 'set LConnectService to Automatic and start it' { Restore-Service 'LConnectService' }
 Invoke-Step 'set LConnectServiceWatcher to Automatic and start it' { Restore-Service 'LConnectServiceWatcher' }
 Invoke-Step 'enable and start scheduled task \LianLi\L-Connect 3' { Enable-Task '\LianLi\' 'L-Connect 3' }
