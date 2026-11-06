@@ -58,9 +58,13 @@ public sealed class FanEngine(
                 _manual.Remove(id);
             if (_config is null)
                 _firstApplied = time.GetTimestamp();
+            var groupsChanged = _config is { } previous && !previous.LianLiGroups.SequenceEqual(config.LianLiGroups);
             _curves = curves;
             _shapers = shapers;
             _config = config;
+            if (groupsChanged)
+                foreach (var slot in _slots.Where(s => s.Backend is not null))
+                    Drop(slot);
         }
     }
 

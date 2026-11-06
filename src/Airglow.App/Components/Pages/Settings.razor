@@ -1,0 +1,189 @@
+@page "/settings"
+@using Airglow.Core.Config
+@inject IServiceClient Client
+
+<h1 class="page-title">Settings</h1>
+
+@if (_draft is null)
+{
+    <div class="banner @(_loadError is null ? "" : "bad")" role="@(_loadError is null ? "status" : "alert")">@(_loadError ?? "Loading...")</div>
+}
+else
+{
+    <section class="panel">
+        <h2 class="panel-title">Engine</h2>
+        <div class="form-grid">
+            <label for="tick">Update interval (ms)</label>
+            <input id="tick" type="number" min="250" max="5000" step="250" @bind="Tick" @bind:event="onchange" />
+            <label for="failsafe-percent">Failsafe speed %</label>
+            <input id="failsafe-percent" type="number" min="0" max="100" @bind="FailsafePercent" @bind:event="onchange" />
+            <label for="failsafe-after">Failsafe after (s)</label>
+            <input id="failsafe-after" type="number" min="1" max="60" step="0.5" @bind="FailsafeAfter" @bind:event="onchange" />
+            <label for="shutdown-percent">Shutdown speed %</label>
+            <input id="shutdown-percent" type="number" min="0" max="100" @bind="ShutdownPercent" @bind:event="onchange" />
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2 class="panel-title">Lian Li groups</h2>
+        <div class="form-grid">
+            @foreach (var group in _draft.LianLiGroups)
+            {
+                var index = group.Index;
+                <label for="@($"group-name-{index}")">Group @(index + 1) name</label>
+                <input id="@($"group-name-{index}")" type="text" value="@group.Name"
+                       @onchange="e => UpdateGroup(index, g => g with { Name = e.Value?.ToString() ?? string.Empty })" />
+                <label for="@($"group-fans-{index}")">Group @(index + 1) fans</label>
+                <input id="@($"group-fans-{index}")" type="number" min="0" max="4" value="@group.FanCount"
+                       @onchange="e => UpdateGroup(index, g => g with { FanCount = int.TryParse(e.Value?.ToString(), out var n) ? n : g.FanCount })" />
+            }
+        </div>
+    </section>
+
+    <section class="panel">
+        <h2 class="panel-title">Startup</h2>
+        <label class="check"><input id="autostart" type="checkbox" checked="@_autostart" @onchange="OnAutostartChanged" /> Start airglow with Windows</label>
+    </section>
+
+    <div class="savebar">
+        @if (_errors.Count > 0)
+        {
+            <ul class="errors" role="alert">
+                @foreach (var error in _errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        }
+        @if (_notice is not null)
+        {
+            <p class="muted">@_notice</p>
+        }
+        <div class="actions">
+            <button type="button" class="btn primary" id="save" disabled="@(!_dirty || _busy)" @onclick="SaveAsync">Save</button>
+            <button type="button" class="btn" id="revert" disabled="@(!_dirty || _busy)" @onclick="RevertAsync">Revert</button>
+            @if (_dirty)
+            {
+                <span class="muted">Unsaved changes</span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private AppConfig? _draft;
+    private IReadOnlyList<string> _errors = [];
+    private string? _loadError;
+    private string? _notice;
+    private bool _dirty;
+    private bool _busy;
+    private bool _autostart;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _autostart = Autostart.IsEnabled;
+        }
+        catch (Exception)
+        {
+            _autostart = false;
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _draft = await Client.GetConfigAsync(default);
+            _loadError = null;
+            _dirty = false;
+            _errors = [];
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Couldn't load the configuration: {ex.Message}";
+        }
+    }
+
+    private void UpdateEngine(Func<EngineSettings, EngineSettings> change)
+    {
+        _draft = _draft! with { Engine = change(_draft.Engine) };
+        Touch();
+    }
+
+    private void UpdateGroup(int index, Func<LianLiGroup, LianLiGroup> change)
+    {
+        _draft = _draft! with { LianLiGroups = [.. _draft.LianLiGroups.Select(g => g.Index == index ? change(g) : g)] };
+        Touch();
+    }
+
+    private void Touch()
+    {
+        _dirty = true;
+        _notice = null;
+    }
+
+    private int Tick { get => _draft!.Engine.TickMilliseconds; set => UpdateEngine(e => e with { TickMilliseconds = value }); }
+
+    private int FailsafePercent { get => _draft!.Engine.FailsafePercent; set => UpdateEngine(e => e with { FailsafePercent = value }); }
+
+    private double FailsafeAfter { get => _draft!.Engine.FailsafeAfterSeconds; set => UpdateEngine(e => e with { FailsafeAfterSeconds = value }); }
+
+    private int ShutdownPercent { get => _draft!.Engine.ShutdownPercent; set => UpdateEngine(e => e with { ShutdownPercent = value }); }
+
+    private void OnAutostartChanged(ChangeEventArgs e)
+    {
+        var enabled = (bool)(e.Value ?? false);
+        try
+        {
+            Autostart.Set(enabled);
+            _autostart = enabled;
+            _errors = [];
+        }
+        catch (Exception ex)
+        {
+            _errors = [$"Couldn't change the startup setting: {ex.Message}"];
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null)
+            return;
+        _busy = true;
+        try
+        {
+            var errors = await Client.SaveConfigAsync(_draft, default);
+            _errors = errors;
+            if (errors.Count == 0)
+            {
+                _dirty = false;
+                _notice = "Saved.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errors = [$"Couldn't save: {ex.Message}"];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevertAsync()
+    {
+        _busy = true;
+        try
+        {
+            await LoadAsync();
+            _notice = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

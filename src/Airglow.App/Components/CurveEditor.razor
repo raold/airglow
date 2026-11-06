@@ -1,0 +1,152 @@
+@using Airglow.Core.Curves
+
+<div class="curve-editor">
+    <svg class="curve-svg" width="@W" height="@H" viewBox="0 0 @W @H" tabindex="0" role="application"
+         aria-label="Fan curve editor" @onkeydown="OnKeyDown">
+        <rect class="curve-bg" x="0" y="0" width="@W" height="@H" @ondblclick="OnDoubleClick" />
+
+        @for (var c = 0; c <= MaxCelsius; c += 10)
+        {
+            <line class="grid" x1="@X(c)" y1="@Top" x2="@X(c)" y2="@Bottom" />
+            @Label(X(c), Bottom + 18, "middle", c.ToString())
+        }
+        @for (var p = 0; p <= 100; p += 10)
+        {
+            <line class="grid" x1="@Left" y1="@Y(p)" x2="@Right" y2="@Y(p)" />
+            @Label(Left - 8, Y(p) + 4, "end", p.ToString())
+        }
+
+        @if (LiveCelsius is { } live && live >= 0 && live <= MaxCelsius)
+        {
+            <line class="live-line" x1="@X(live)" y1="@Top" x2="@X(live)" y2="@Bottom" />
+            @if (LivePercent is { } output)
+            {
+                <circle class="live-dot" cx="@X(live)" cy="@Y(output)" r="5" />
+            }
+        }
+
+        <polyline class="curve-line" points="@Line()" />
+
+        @for (var i = 0; i < Points.Count; i++)
+        {
+            var index = i;
+            <circle class="point @(_selected == index ? "selected" : "")" cx="@X(Points[i].Celsius)" cy="@Y(Points[i].Percent)" r="7"
+                    @onpointerdown="e => OnPointDown(index)" @onpointerdown:stopPropagation="true" />
+        }
+
+        @if (_drag is not null)
+        {
+            <rect class="drag-overlay" x="0" y="0" width="@W" height="@H"
+                  @onpointermove="OnMove" @onpointerup="EndDrag" @onpointerleave="EndDrag" />
+        }
+    </svg>
+    <div class="curve-tools">
+        <span class="mono muted">@Readout()</span>
+        <button type="button" class="btn" disabled="@(_selected is null || Points.Count <= 2)" @onclick="RemoveSelectedAsync">Remove point</button>
+        <span class="muted hint">Double-click to add a point. Drag to move. Delete removes the selected point.</span>
+    </div>
+</div>
+
+@code {
+    private const int W = 640;
+    private const int H = 360;
+    private const double Left = 44;
+    private const double Right = 624;
+    private const double Top = 12;
+    private const double Bottom = 328;
+    private const double MaxCelsius = 110;
+
+    private int? _selected;
+    private int? _drag;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<CurvePoint> Points { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<IReadOnlyList<CurvePoint>> PointsChanged { get; set; }
+
+    [Parameter]
+    public double? LiveCelsius { get; set; }
+
+    [Parameter]
+    public double? LivePercent { get; set; }
+
+    // Razor treats <text> as a special tag, so the SVG axis labels are built by hand.
+    private static RenderFragment Label(double x, double y, string anchor, string content) => builder =>
+    {
+        builder.OpenElement(0, "text");
+        builder.AddAttribute(1, "class", "axis");
+        builder.AddAttribute(2, "x", x.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+        builder.AddAttribute(3, "y", y.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture));
+        builder.AddAttribute(4, "text-anchor", anchor);
+        builder.AddContent(5, content);
+        builder.CloseElement();
+    };
+
+    private static double X(double celsius) => Left + celsius / MaxCelsius * (Right - Left);
+
+    private static double Y(double percent) => Bottom - percent / 100 * (Bottom - Top);
+
+    private static CurvePoint At(double x, double y) =>
+        new((x - Left) / (Right - Left) * MaxCelsius, (Bottom - y) / (Bottom - Top) * 100);
+
+    private string Line() => string.Join(' ', Points.Select(p => FormattableString.Invariant($"{X(p.Celsius):0.##},{Y(p.Percent):0.##}")));
+
+    private string Readout() =>
+        _selected is { } i && i < Points.Count ? $"{Points[i].Celsius:0.#} °C, {Points[i].Percent:0}%" : "No point selected";
+
+    private void OnPointDown(int index)
+    {
+        _selected = index;
+        _drag = index;
+    }
+
+    private async Task OnMove(PointerEventArgs e)
+    {
+        if (_drag is not { } index)
+            return;
+        if (e.Buttons == 0)
+        {
+            _drag = null;
+            return;
+        }
+
+        var next = CurveEditing.Move(Points, index, At(e.OffsetX, e.OffsetY));
+        if (!next.SequenceEqual(Points))
+            await PointsChanged.InvokeAsync(next);
+    }
+
+    private void EndDrag() => _drag = null;
+
+    private async Task OnDoubleClick(MouseEventArgs e)
+    {
+        if (e.OffsetX < Left || e.OffsetX > Right || e.OffsetY < Top || e.OffsetY > Bottom)
+            return;
+
+        var next = CurveEditing.Add(Points, At(e.OffsetX, e.OffsetY));
+        if (next.SequenceEqual(Points))
+            return;
+
+        _selected = next.Select((p, i) => (p, i)).First(x => !Points.Contains(x.p)).i;
+        await PointsChanged.InvokeAsync(next);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Delete")
+            await RemoveSelectedAsync();
+    }
+
+    private async Task RemoveSelectedAsync()
+    {
+        if (_selected is not { } index)
+            return;
+
+        var next = CurveEditing.Remove(Points, index);
+        if (next.SequenceEqual(Points))
+            return;
+
+        _selected = null;
+        await PointsChanged.InvokeAsync(next);
+    }
+}

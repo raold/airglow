@@ -1,0 +1,446 @@
+@page "/fans"
+@using Airglow.Core.Config
+@using Airglow.Core.Curves
+@using Airglow.Core.Engine
+@using Airglow.Core.Hardware
+@implements IDisposable
+@inject IServiceClient Client
+@inject LiveState Live
+
+<h1 class="page-title">Fans</h1>
+
+@if (_draft is null)
+{
+    <div class="banner @(_loadError is null ? "" : "bad")" role="@(_loadError is null ? "status" : "alert")">@(_loadError ?? "Loading...")</div>
+}
+else
+{
+    <div class="fans-layout">
+        <ul class="fan-list">
+            @foreach (var f in _draft.Fans)
+            {
+                var id = f.FanId;
+                <li><button type="button" class="fan-item @(id == _fanId ? "active" : "")" @onclick="() => Select(id)">
+                    <span>@f.Name</span>
+                    <span class="mono muted">@Percent(id)</span>
+                </button></li>
+            }
+        </ul>
+
+        <div class="fan-detail">
+            @if (Fan is { } fan)
+            {
+                <section class="panel">
+                    <h2 class="panel-title">@fan.Name</h2>
+                    <div class="form-grid">
+                        <label for="fan-curve">Curve</label>
+                        <select id="fan-curve" @bind="CurveId" @bind:event="onchange">
+                            <option value="">None (manual only)</option>
+                            @foreach (var c in _draft.Curves)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                        <label for="fan-min">Minimum %</label>
+                        <input id="fan-min" type="number" min="0" max="100" @bind="Min" @bind:event="onchange" />
+                        <label for="fan-start">Start %</label>
+                        <input id="fan-start" type="number" min="0" max="100" @bind="Start" @bind:event="onchange" />
+                        <label for="fan-stop">Stop below %</label>
+                        <input id="fan-stop" type="number" min="0" max="100" step="0.5" @bind="StopBelow" @bind:event="onchange" />
+                        <label for="fan-offset">Offset %</label>
+                        <input id="fan-offset" type="number" min="-100" max="100" @bind="Offset" @bind:event="onchange" />
+                        <label for="fan-step-up">Step up %</label>
+                        <input id="fan-step-up" type="number" min="1" max="100" @bind="StepUp" @bind:event="onchange" />
+                        <label for="fan-step-down">Step down %</label>
+                        <input id="fan-step-down" type="number" min="1" max="100" @bind="StepDown" @bind:event="onchange" />
+                    </div>
+
+                    <div class="manual">
+                        <span class="stat-label">Manual override</span>
+                        <label class="check"><input id="manual-auto" type="checkbox" checked="@(ManualValue is null)" @onchange="OnAutoChanged" /> Auto</label>
+                        <input id="manual-slider" type="range" min="0" max="100" disabled="@(ManualValue is null)"
+                               value="@(ManualValue ?? 0)" @onchange="OnManualChanged" />
+                        <span class="mono">@(ManualValue is { } m ? $"{m}%" : "Auto")</span>
+                    </div>
+                </section>
+
+                <section class="panel">
+                    <h2 class="panel-title">Curve</h2>
+                    @if (Curve is { } curve)
+                    {
+                        <div class="form-grid">
+                            <label for="curve-name">Name</label>
+                            <input id="curve-name" type="text" value="@curve.Name" @onchange="e => UpdateCurve(c => c with { Name = e.Value?.ToString() ?? string.Empty })" />
+                            <label for="curve-type">Type</label>
+                            <select id="curve-type" value="@TypeOf(curve)" @onchange="e => ChangeType(e.Value?.ToString())">
+                                <option value="graph">Graph</option>
+                                <option value="flat">Flat</option>
+                                <option value="mix">Mix</option>
+                            </select>
+                        </div>
+
+                        @switch (curve)
+                        {
+                            case GraphCurve graph:
+                                <div class="form-grid">
+                                    <label for="curve-sensor">Sensor</label>
+                                    <select id="curve-sensor" value="@graph.SensorId" @onchange="e => UpdateGraph(g => g with { SensorId = e.Value?.ToString() ?? g.SensorId })">
+                                        @foreach (var s in SensorOptions(graph.SensorId))
+                                        {
+                                            <option value="@s.Id">@s.Name</option>
+                                        }
+                                    </select>
+                                    <label for="hyst-up">Rise delta °C</label>
+                                    <input id="hyst-up" type="number" step="0.5" min="0" value="@graph.Hysteresis.UpCelsius" @onchange="e => UpdateHysteresis(h => h with { UpCelsius = Num(e, h.UpCelsius) })" />
+                                    <label for="hyst-down">Fall delta °C</label>
+                                    <input id="hyst-down" type="number" step="0.5" min="0" value="@graph.Hysteresis.DownCelsius" @onchange="e => UpdateHysteresis(h => h with { DownCelsius = Num(e, h.DownCelsius) })" />
+                                    <label for="hyst-resp-up">Response up (s)</label>
+                                    <input id="hyst-resp-up" type="number" step="0.5" min="0" value="@graph.Hysteresis.ResponseUpSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseUpSeconds = Num(e, h.ResponseUpSeconds) })" />
+                                    <label for="hyst-resp-down">Response down (s)</label>
+                                    <input id="hyst-resp-down" type="number" step="0.5" min="0" value="@graph.Hysteresis.ResponseDownSeconds" @onchange="e => UpdateHysteresis(h => h with { ResponseDownSeconds = Num(e, h.ResponseDownSeconds) })" />
+                                    <label for="hyst-limits">Ignore at limits</label>
+                                    <input id="hyst-limits" type="checkbox" checked="@graph.Hysteresis.IgnoreAtLimits" @onchange="e => UpdateHysteresis(h => h with { IgnoreAtLimits = (bool)(e.Value ?? false) })" />
+                                </div>
+                                <CurveEditor Points="graph.Points" PointsChanged="points => UpdateGraph(g => g with { Points = points })"
+                                             LiveCelsius="LiveCelsius(graph.SensorId)" LivePercent="LiveFan?.CurvePercent" />
+                                break;
+                            case FlatCurve flat:
+                                <div class="form-grid">
+                                    <label for="flat-percent">Percent</label>
+                                    <input id="flat-percent" type="number" min="0" max="100" value="@flat.Percent" @onchange="e => UpdateCurve(c => ((FlatCurve)c) with { Percent = Int(e, flat.Percent) })" />
+                                </div>
+                                break;
+                            case MixCurve mix:
+                                <div class="form-grid">
+                                    <label for="mix-function">Function</label>
+                                    <select id="mix-function" value="@mix.Function" @onchange="e => UpdateCurve(c => ((MixCurve)c) with { Function = Enum.Parse<MixFunction>(e.Value!.ToString()!) })">
+                                        @foreach (var fn in Enum.GetValues<MixFunction>())
+                                        {
+                                            <option value="@fn">@fn</option>
+                                        }
+                                    </select>
+                                    <span>Members</span>
+                                    <div class="members">
+                                        @foreach (var other in _draft.Curves.Where(c => c.Id != mix.Id))
+                                        {
+                                            var memberId = other.Id;
+                                            <label class="check"><input type="checkbox" checked="@mix.CurveIds.Contains(memberId)" @onchange="e => ToggleMember(memberId, (bool)(e.Value ?? false))" /> @other.Name</label>
+                                        }
+                                    </div>
+                                </div>
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        <p class="muted">This fan has no curve.</p>
+                    }
+                    <div class="actions">
+                        <button type="button" class="btn" @onclick="NewCurve">New curve</button>
+                        <button type="button" class="btn" disabled="@(Curve is null)" @onclick="DuplicateCurve">Duplicate</button>
+                        <button type="button" class="btn danger" disabled="@(Curve is null)" @onclick="DeleteCurve">Delete curve</button>
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+
+    <div class="savebar">
+        @if (_errors.Count > 0)
+        {
+            <ul class="errors" role="alert">
+                @foreach (var error in _errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        }
+        @if (_notice is not null)
+        {
+            <p class="muted">@_notice</p>
+        }
+        <div class="actions">
+            <button type="button" class="btn primary" id="save" disabled="@(!_dirty || _busy)" @onclick="SaveAsync">Save</button>
+            <button type="button" class="btn" id="revert" disabled="@(!_dirty || _busy)" @onclick="RevertAsync">Revert</button>
+            @if (_dirty)
+            {
+                <span class="muted">Unsaved changes</span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] WellKnown = ["cpu.package", "gpu.core", "gpu.hotspot", "gpu.memory"];
+
+    private AppConfig? _draft;
+    private IReadOnlyList<SensorInfo> _sensors = [];
+    private IReadOnlyList<string> _errors = [];
+    private readonly Dictionary<string, int?> _manual = [];
+    private string? _fanId;
+    private string? _loadError;
+    private string? _notice;
+    private bool _dirty;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Live.Changed += OnChanged;
+        await LoadAsync();
+        try
+        {
+            _sensors = await Client.GetSensorsAsync(default);
+        }
+        catch (Exception)
+        {
+            _sensors = [];
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _draft = await Client.GetConfigAsync(default);
+            _loadError = null;
+            _dirty = false;
+            _errors = [];
+            if (_fanId is null || !_draft.Fans.Any(f => f.FanId == _fanId))
+                _fanId = _draft.Fans.FirstOrDefault()?.FanId;
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Couldn't load the configuration: {ex.Message}";
+        }
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private FanTarget? Fan => _draft?.Fans.FirstOrDefault(f => f.FanId == _fanId);
+
+    private FanCurve? Curve => Fan?.CurveId is { } id ? _draft!.Curves.FirstOrDefault(c => c.Id == id) : null;
+
+    private FanReading? LiveFan => Live.State?.Fans.FirstOrDefault(f => f.Id == _fanId);
+
+    private string Percent(string fanId) =>
+        Live.State?.Fans.FirstOrDefault(f => f.Id == fanId)?.CommandedPercent is { } p ? $"{p}%" : "";
+
+    private double? LiveCelsius(string sensorId) =>
+        Live.State?.Temperatures.FirstOrDefault(t => t.Id == sensorId)?.Celsius;
+
+    private IEnumerable<SensorInfo> SensorOptions(string current)
+    {
+        var shown = _sensors
+            .Where(s => !s.Name.Contains("Distance to TjMax", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(s => WellKnown.Contains(s.Id) ? Array.IndexOf(WellKnown, s.Id) : WellKnown.Length)
+            .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (shown.All(s => s.Id != current))
+            shown.Insert(0, new SensorInfo(current, current, ""));
+        return shown;
+    }
+
+    private static string TypeOf(FanCurve curve) => curve switch
+    {
+        GraphCurve => "graph",
+        FlatCurve => "flat",
+        _ => "mix",
+    };
+
+    private static double Num(ChangeEventArgs e, double fallback) =>
+        double.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
+
+    private static int Int(ChangeEventArgs e, int fallback) =>
+        int.TryParse(e.Value?.ToString(), out var v) ? v : fallback;
+
+    private void Select(string id)
+    {
+        _fanId = id;
+        _notice = null;
+    }
+
+    // Fan fields
+
+    private void UpdateFan(Func<FanTarget, FanTarget> change)
+    {
+        _draft = _draft! with { Fans = [.. _draft.Fans.Select(f => f.FanId == _fanId ? change(f) : f)] };
+        Touch();
+    }
+
+    private void Touch()
+    {
+        _dirty = true;
+        _notice = null;
+    }
+
+    private string CurveId
+    {
+        get => Fan?.CurveId ?? "";
+        set => UpdateFan(f => f with { CurveId = value == "" ? null : value });
+    }
+
+    private int Min { get => Fan!.MinPercent; set => UpdateFan(f => f with { MinPercent = value }); }
+
+    private int Start { get => Fan!.StartPercent; set => UpdateFan(f => f with { StartPercent = value }); }
+
+    private double? StopBelow { get => Fan!.StopBelowPercent; set => UpdateFan(f => f with { StopBelowPercent = value }); }
+
+    private int Offset { get => Fan!.OffsetPercent; set => UpdateFan(f => f with { OffsetPercent = value }); }
+
+    private int StepUp { get => Fan!.StepUpPercent; set => UpdateFan(f => f with { StepUpPercent = value }); }
+
+    private int StepDown { get => Fan!.StepDownPercent; set => UpdateFan(f => f with { StepDownPercent = value }); }
+
+    // Manual override
+
+    private int? ManualValue =>
+        _fanId is { } id && _manual.TryGetValue(id, out var m)
+            ? m
+            : LiveFan is { Mode: FanMode.Manual, CommandedPercent: { } p } ? p : null;
+
+    private async Task OnAutoChanged(ChangeEventArgs e)
+    {
+        var auto = (bool)(e.Value ?? true);
+        await SetManualAsync(auto ? null : LiveFan?.CommandedPercent ?? 50);
+    }
+
+    private async Task OnManualChanged(ChangeEventArgs e) => await SetManualAsync(Int(e, 0));
+
+    private async Task SetManualAsync(int? percent)
+    {
+        if (_fanId is not { } id)
+            return;
+        try
+        {
+            await Client.SetManualAsync(id, percent, default);
+            _manual[id] = percent;
+            _errors = [];
+        }
+        catch (Exception ex)
+        {
+            _errors = [$"Couldn't set the manual override: {ex.Message}"];
+        }
+    }
+
+    // Curves
+
+    private void UpdateCurve(Func<FanCurve, FanCurve> change)
+    {
+        if (Curve is not { } current)
+            return;
+        _draft = _draft! with { Curves = [.. _draft.Curves.Select(c => c.Id == current.Id ? change(c) : c)] };
+        Touch();
+    }
+
+    private void UpdateGraph(Func<GraphCurve, GraphCurve> change) => UpdateCurve(c => change((GraphCurve)c));
+
+    private void UpdateHysteresis(Func<HysteresisSettings, HysteresisSettings> change) =>
+        UpdateGraph(g => g with { Hysteresis = change(g.Hysteresis) });
+
+    private void ToggleMember(string id, bool on) =>
+        UpdateCurve(c =>
+        {
+            var mix = (MixCurve)c;
+            var ids = mix.CurveIds.Where(m => m != id).ToList();
+            if (on)
+                ids.Add(id);
+            return mix with { CurveIds = ids };
+        });
+
+    private void ChangeType(string? type)
+    {
+        if (Curve is not { } current || type == TypeOf(current))
+            return;
+        var first = _draft!.Curves.FirstOrDefault(c => c.Id != current.Id);
+        UpdateCurve(c => type switch
+        {
+            "flat" => new FlatCurve(c.Id, c.Name, 50),
+            "mix" => new MixCurve(c.Id, c.Name, MixFunction.Max, first is null ? [] : [first.Id]),
+            _ => NewGraph(c.Id, c.Name),
+        });
+    }
+
+    private string NextCurveId()
+    {
+        var n = 1;
+        while (_draft!.Curves.Any(c => c.Id == $"curve-{n}"))
+            n++;
+        return $"curve-{n}";
+    }
+
+    private static GraphCurve NewGraph(string id, string name) => new(
+        id, name, "cpu.package", [new CurvePoint(30, 20), new CurvePoint(70, 100)], new HysteresisSettings());
+
+    private void AddCurve(FanCurve curve)
+    {
+        _draft = _draft! with { Curves = [.. _draft.Curves, curve] };
+        UpdateFan(f => f with { CurveId = curve.Id });
+    }
+
+    private void NewCurve() => AddCurve(NewGraph(NextCurveId(), "New curve"));
+
+    private void DuplicateCurve()
+    {
+        if (Curve is { } curve)
+            AddCurve(curve with { Id = NextCurveId(), Name = $"{curve.Name} copy" });
+    }
+
+    private void DeleteCurve()
+    {
+        if (Curve is not { } curve)
+            return;
+
+        var curves = _draft!.Curves
+            .Where(c => c.Id != curve.Id)
+            .Select(c => c is MixCurve m && m.CurveIds.Contains(curve.Id)
+                ? m with { CurveIds = [.. m.CurveIds.Where(id => id != curve.Id)] }
+                : c)
+            .ToList();
+        var fans = _draft.Fans.Select(f => f.CurveId == curve.Id ? f with { CurveId = null } : f).ToList();
+        _draft = _draft with { Curves = curves, Fans = fans };
+        Touch();
+    }
+
+    // Save and revert
+
+    private async Task SaveAsync()
+    {
+        if (_draft is null)
+            return;
+        _busy = true;
+        try
+        {
+            var errors = await Client.SaveConfigAsync(_draft, default);
+            _errors = errors;
+            if (errors.Count == 0)
+            {
+                _dirty = false;
+                _notice = "Saved.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _errors = [$"Couldn't save: {ex.Message}"];
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevertAsync()
+    {
+        _busy = true;
+        try
+        {
+            await LoadAsync();
+            _notice = null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose() => Live.Changed -= OnChanged;
+}

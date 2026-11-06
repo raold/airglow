@@ -75,6 +75,8 @@ public sealed class FakeFactory(FakeBackend backend, params string[] conflicting
 
     public int Creates { get; private set; }
 
+    public AppConfig? LastConfig { get; private set; }
+
     public bool Present { get; set; } = true;
 
     public Exception? ThrowOnCreate { get; set; }
@@ -82,6 +84,7 @@ public sealed class FakeFactory(FakeBackend backend, params string[] conflicting
     public IHardwareBackend? TryCreate(AppConfig config)
     {
         Creates++;
+        LastConfig = config;
         if (ThrowOnCreate is { } error)
             throw error;
         if (!Present)

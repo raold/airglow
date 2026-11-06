@@ -515,4 +515,33 @@ public class FanEngineTests
 
         Assert.Equal(["SetPercent(50)", "SetPercent(58)"], Fan("gpu.fan1").Calls);
     }
+
+    [Fact]
+    public void Changed_lianli_groups_reopen_backends_with_the_new_config()
+    {
+        _engine.Tick();
+        var edited = _config with
+        {
+            LianLiGroups = [.. _config.LianLiGroups.Select(g => g.Index == 1 ? g with { FanCount = 5 } : g)],
+        };
+
+        _engine.ApplyConfig(edited);
+        Next();
+
+        Assert.Equal(2, _gpu.Creates);
+        Assert.Equal(2, _lianli.Creates);
+        Assert.Equal(5, _lianli.LastConfig!.LianLiGroups.Single(g => g.Index == 1).FanCount);
+    }
+
+    [Fact]
+    public void Unchanged_lianli_groups_keep_backends_open()
+    {
+        _engine.Tick();
+
+        _engine.ApplyConfig(_config with { LianLiGroups = [.. _config.LianLiGroups] });
+        Next();
+
+        Assert.Equal(1, _gpu.Creates);
+        Assert.Equal(1, _lianli.Creates);
+    }
 }
