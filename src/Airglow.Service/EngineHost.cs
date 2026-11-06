@@ -1,3 +1,4 @@
+using Airglow.Core;
 using Airglow.Core.Config;
 using Airglow.Core.Engine;
 
@@ -58,11 +59,26 @@ public sealed class EngineHost(
 
     internal void LoadConfig()
     {
-        var loaded = store.Load();
-        holder.Set(loaded.Config, loaded.Problem);
-        engine.ApplyConfig(loaded.Config);
-        if (loaded.Problem is { } problem)
-            log.LogWarning("{Problem}", problem);
+        try
+        {
+            // Only the real %ProgramData% folder is locked down; tests point Airglow:ConfigPath at folders they must write to.
+            var path = Path.GetFullPath(store.FilePath);
+            if (string.Equals(path, AirglowPaths.ConfigFile, StringComparison.OrdinalIgnoreCase))
+                ConfigDirectory.Secure(Path.GetDirectoryName(path)!);
+
+            var loaded = store.Load();
+            engine.ApplyConfig(loaded.Config);
+            holder.Set(loaded.Config, loaded.Problem);
+            if (loaded.Problem is { } problem)
+                log.LogWarning("{Problem}", problem);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "Loading config.json failed; running on the defaults");
+            var fallback = AppConfig.CreateDefault();
+            engine.ApplyConfig(fallback);
+            holder.Set(fallback, $"config.json could not be loaded: {ex.Message}");
+        }
     }
 
     internal void RunTick()

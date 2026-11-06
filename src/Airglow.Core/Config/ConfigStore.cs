@@ -6,6 +6,8 @@ public sealed record LoadResult(AppConfig Config, string? Problem);
 
 public sealed class ConfigStore(string path)
 {
+    public string FilePath => path;
+
     public LoadResult Load()
     {
         var directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
@@ -47,6 +49,7 @@ public sealed class ConfigStore(string path)
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         var tmp = path + ".tmp";
+        File.Delete(tmp);
         File.WriteAllText(tmp, JsonSerializer.Serialize(config, ConfigJson.Options));
         File.Move(tmp, path, overwrite: true);
     }

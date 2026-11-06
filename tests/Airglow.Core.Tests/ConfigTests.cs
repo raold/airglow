@@ -204,6 +204,22 @@ public sealed class ConfigTests : IDisposable
     }
 
     [Fact]
+    public void Save_replaces_a_stale_tmp_file_instead_of_writing_into_it()
+    {
+        Directory.CreateDirectory(_dir);
+        var path = Path.Combine(_dir, "config.json");
+        File.WriteAllText(path + ".tmp", "stale");
+        using var stale = new FileStream(path + ".tmp", FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+        new ConfigStore(path).Save(AppConfig.CreateDefault());
+
+        using var reader = new StreamReader(stale);
+        Assert.Equal("stale", reader.ReadToEnd());
+        Assert.False(File.Exists(path + ".tmp"));
+        Assert.Null(new ConfigStore(path).Load().Problem);
+    }
+
+    [Fact]
     public void Save_rejects_invalid_config()
     {
         var store = new ConfigStore(Path.Combine(_dir, "config.json"));

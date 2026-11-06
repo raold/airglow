@@ -66,12 +66,12 @@ public sealed class ResilienceTests : IDisposable
         new ConfigStore(_configPath).Save(seed with { Engine = seed.Engine with { TickMilliseconds = 250 } });
     }
 
-    private void Start(IConflictDetector conflicts, WatchdogOptions? watchdog = null)
+    private void Start(IConflictDetector conflicts, WatchdogOptions? watchdog = null, string? configPath = null)
     {
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
         {
             host.UseEnvironment("Testing");
-            host.UseSetting("Airglow:ConfigPath", _configPath);
+            host.UseSetting("Airglow:ConfigPath", configPath ?? _configPath);
             host.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IBackendFactory>();
@@ -192,6 +192,20 @@ public sealed class ResilienceTests : IDisposable
         Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
 
         await WaitForState(s => s.Faults.Count == 0);
+    }
+
+    [Fact]
+    public async Task Unloadable_config_falls_back_to_defaults_and_keeps_ticking()
+    {
+        var blocker = Path.Combine(_directory, "blocker");
+        File.WriteAllText(blocker, "a file where the config folder should be");
+        Start(new FakeConflicts(), configPath: Path.Combine(blocker, "config.json"));
+
+        var state = await WaitForState(s => s.Fans.Count == 6);
+
+        Assert.Contains(state.Faults, f => f.StartsWith("config.json could not be loaded: "));
+        var config = (await _client!.GetFromJsonAsync<AppConfig>("/api/config", ConfigJson.Options))!;
+        Assert.Equal(AppConfig.CreateDefault().Engine, config.Engine);
     }
 
     [Fact]
