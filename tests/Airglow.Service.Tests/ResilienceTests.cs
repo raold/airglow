@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Pipes;
+using System.Net.Sockets;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using Airglow.Core.Config;
@@ -169,5 +171,58 @@ public sealed class ResilienceTests : IDisposable
         Assert.Contains(Sid(WellKnownSidType.LocalSystemSid), allowed);
         Assert.Contains(Sid(WellKnownSidType.BuiltinAdministratorsSid), allowed);
         Assert.Contains(Sid(WellKnownSidType.AuthenticatedUserSid), allowed);
+    }
+
+    [Fact]
+    public void Pipe_acl_configure_turns_off_current_user_only()
+    {
+        var options = new Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes.NamedPipeTransportOptions();
+
+        PipeAcl.Configure(options);
+
+        Assert.False(options.CurrentUserOnly);
+        Assert.NotNull(options.PipeSecurity);
+    }
+
+    [Fact]
+    public async Task State_is_served_over_a_real_named_pipe()
+    {
+        SeedValid();
+        var pipe = $"airglow-test-{Guid.NewGuid():N}";
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
+        {
+            host.UseEnvironment("Staging");
+            host.UseSetting("Airglow:ConfigPath", _configPath);
+            host.UseSetting("Airglow:PipeName", pipe);
+            host.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IBackendFactory>();
+                services.RemoveAll<IConflictDetector>();
+                services.AddSingleton<IBackendFactory>(_gpu);
+                services.AddSingleton<IBackendFactory>(_lianli);
+                services.AddSingleton<IConflictDetector>(new FakeConflicts());
+            });
+        });
+        _factory.UseKestrel();
+        _factory.StartServer();
+
+        using var handler = new SocketsHttpHandler
+        {
+            ConnectCallback = async (_, token) =>
+            {
+                var stream = new NamedPipeClientStream(".", pipe, PipeDirection.InOut, PipeOptions.Asynchronous);
+                await stream.ConnectAsync(token);
+                return stream;
+            },
+        };
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("http://airglow") };
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            var response = await client.GetAsync("/api/state", timeout.Token);
+            if (response.StatusCode == HttpStatusCode.OK)
+                break;
+            await Task.Delay(50, timeout.Token);
+        }
     }
 }

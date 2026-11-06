@@ -12,8 +12,8 @@ builder.Host.UseWindowsService(o => o.ServiceName = "Airglow");
 
 if (!builder.Environment.IsEnvironment("Testing"))
 {
-    builder.WebHost.UseNamedPipes(o => o.PipeSecurity = PipeAcl.Create());
-    builder.WebHost.ConfigureKestrel(k => k.ListenNamedPipe(AirglowPaths.PipeName));
+    builder.WebHost.UseNamedPipes(PipeAcl.Configure);
+    builder.WebHost.ConfigureKestrel(k => k.ListenNamedPipe(builder.Configuration["Airglow:PipeName"] ?? AirglowPaths.PipeName));
 }
 
 builder.Services.ConfigureHttpJsonOptions(o =>
