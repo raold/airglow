@@ -23,4 +23,8 @@
     <InternalsVisibleTo Include="Airglow.App.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

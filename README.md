@@ -106,3 +106,7 @@ Protocol knowledge comes from these projects; airglow's code is its own.
   DIMMs, GPU and motherboard.
 - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) (MPL-2.0):
   used as a library for sensors and GPU fans.
+
+[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt) lists every third-party component the installer
+ships (libraries, the .NET runtime, WebView2 and fonts) with its licence; it is also installed next
+to both programs.

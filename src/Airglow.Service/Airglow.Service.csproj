@@ -13,4 +13,8 @@
     <ProjectReference Include="..\Airglow.Hardware\Airglow.Hardware.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
