@@ -5,6 +5,7 @@ namespace Airglow.App;
 
 public partial class App : System.Windows.Application
 {
+    private SingleInstance? _instance;
     private ServiceProvider? _services;
     private TrayIcon? _tray;
     private MainWindow? _window;
@@ -12,6 +13,16 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        _instance = new SingleInstance("airglow-app");
+        if (!_instance.IsFirst)
+        {
+            _instance.SignalFirst();
+            Shutdown();
+            return;
+        }
+
+        _instance.ShowRequested += () => Dispatcher.BeginInvoke(ShowWindow);
 
         var services = new ServiceCollection();
         services.AddWpfBlazorWebView();
@@ -31,6 +42,7 @@ public partial class App : System.Windows.Application
     {
         _tray?.Dispose();
         _services?.Dispose();
+        _instance?.Dispose();
         base.OnExit(e);
     }
 

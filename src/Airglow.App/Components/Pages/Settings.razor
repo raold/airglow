@@ -42,7 +42,14 @@ else
 
     <section class="panel">
         <h2 class="panel-title">Startup</h2>
-        <label class="check"><input id="autostart" type="checkbox" checked="@_autostart" @onchange="OnAutostartChanged" /> Start airglow with Windows</label>
+        @if (_managedByInstaller)
+        {
+            <label class="check"><input id="autostart" type="checkbox" checked disabled /> Starts at sign-in (set by the installer)</label>
+        }
+        else
+        {
+            <label class="check"><input id="autostart" type="checkbox" checked="@_autostart" @onchange="OnAutostartChanged" /> Start airglow with Windows</label>
+        }
     </section>
 
     <SaveBar Draft="Draft" Changed="Refresh" />
@@ -57,12 +64,14 @@ else
     }
 
     private bool _autostart;
+    private bool _managedByInstaller;
 
     protected override async Task OnInitializedAsync()
     {
         Draft = new ConfigDraft(Client);
         try
         {
+            _managedByInstaller = Autostart.IsManagedByInstaller;
             _autostart = Autostart.IsEnabled;
         }
         catch (Exception)

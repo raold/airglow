@@ -15,6 +15,10 @@ else if (Live.State is { } state)
     {
         <div class="banner bad" role="alert">The engine hasn't updated since @state.At.ToLocalTime().ToString("HH:mm:ss").</div>
     }
+    @if (state.Temperatures.Count > 0 && state.Temperatures.All(t => t.Id != "cpu.package"))
+    {
+        <div class="banner warn" role="status">CPU temperature isn't available. The PawnIO driver may be missing; get it from pawnio.eu.</div>
+    }
     <section class="panel">
         <h2 class="panel-title">Fans</h2>
         <div class="fan-grid">

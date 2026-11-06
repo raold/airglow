@@ -182,6 +182,40 @@ public sealed class OverviewTests
     }
 
     [Fact]
+    public async Task Shows_pawnio_hint_when_cpu_temperature_missing()
+    {
+        var withoutCpu = WithTemps([new TempReading("gpu.core", "GPU Core", 45)]);
+        var (ctx, page) = await RenderAsync(new FakeClient { State = withoutCpu });
+        using (ctx)
+        {
+            Assert.Equal("CPU temperature isn't available. The PawnIO driver may be missing; get it from pawnio.eu.",
+                page.Find(".banner.warn").TextContent.Trim());
+        }
+
+        var (ctx2, page2) = await RenderAsync(new FakeClient { State = StateOf(Fan("f1", "Fan 1")) });
+        using (ctx2)
+        {
+            Assert.Empty(page2.FindAll(".banner"));
+        }
+    }
+
+    [Fact]
+    public async Task No_pawnio_hint_when_disconnected_or_no_temperatures()
+    {
+        var (ctx, page) = await RenderAsync(new FakeClient());
+        using (ctx)
+        {
+            Assert.DoesNotContain("PawnIO", page.Markup);
+        }
+
+        var (ctx2, page2) = await RenderAsync(new FakeClient { State = WithTemps([]) });
+        using (ctx2)
+        {
+            Assert.DoesNotContain("PawnIO", page2.Markup);
+        }
+    }
+
+    [Fact]
     public async Task Distance_to_tjmax_sensors_never_show()
     {
         var temps = WellKnownTemps().Append(new TempReading("x", "CPU Core #1 Distance to TjMax", 60));
