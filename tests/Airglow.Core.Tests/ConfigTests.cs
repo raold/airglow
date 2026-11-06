@@ -168,4 +168,17 @@ public sealed class ConfigTests : IDisposable
         Assert.Contains("Lian Li group 4: Index must be 0-3", errors);
         Assert.Contains("Duplicate Lian Li group index 1", errors);
     }
+
+    [Fact]
+    public void Rejects_missing_curve_and_fan_ids()
+    {
+        var c = AppConfig.CreateDefault();
+        var errors = ConfigValidator.Validate(c with
+        {
+            Curves = [new FlatCurve(null!, "X", 10), new FlatCurve("", "Y", 10)],
+            Fans = [new FanTarget(null!, "F", null), new FanTarget("", "G", null)]
+        });
+        Assert.Contains("Curve: missing id", errors);
+        Assert.Contains("Fan: missing id", errors);
+    }
 }

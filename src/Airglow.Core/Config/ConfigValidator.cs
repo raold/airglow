@@ -36,11 +36,16 @@ public static class ConfigValidator
                 errors.Add("Curves: null entry");
                 continue;
             }
+            if (string.IsNullOrEmpty(curve.Id))
+            {
+                errors.Add("Curve: missing id");
+                continue;
+            }
             if (!byId.TryAdd(curve.Id, curve))
                 errors.Add($"Duplicate curve id '{curve.Id}'");
         }
 
-        foreach (var curve in config.Curves.Where(c => c is not null))
+        foreach (var curve in config.Curves.Where(c => c is not null && !string.IsNullOrEmpty(c.Id)))
         {
             switch (curve)
             {
@@ -72,6 +77,11 @@ public static class ConfigValidator
             if (fan is null)
             {
                 errors.Add("Fans: null entry");
+                continue;
+            }
+            if (string.IsNullOrEmpty(fan.FanId))
+            {
+                errors.Add("Fan: missing id");
                 continue;
             }
             var id = fan.FanId;
