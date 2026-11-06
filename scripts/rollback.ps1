@@ -4,24 +4,42 @@ $ErrorActionPreference = 'Stop'
 
 $appDir = Join-Path $env:ProgramFiles 'Airglow\App'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$script:failed = 0
 
+# Best effort: every step runs even if an earlier one failed.
 function Invoke-Step {
     param([string]$Description, [scriptblock]$Action)
     if (-not $Go) { Write-Host "WOULD $Description"; return }
     Write-Host "DOING $Description"
     try { & $Action }
-    catch { throw "FAILED: $Description - $($_.Exception.Message)" }
+    catch { $script:failed++; Write-Host "WARN: $Description - $($_.Exception.Message)" }
 }
 
 function Enable-Task {
-    param([string]$Path)
-    $folder = Split-Path $Path -Parent
-    if (-not $folder.EndsWith('\')) { $folder += '\' }
-    Enable-ScheduledTask -TaskPath $folder -TaskName (Split-Path $Path -Leaf) | Out-Null
+    param([string]$Folder, [string]$Name)
+    if (-not (Get-ScheduledTask -TaskPath $Folder -TaskName $Name -ErrorAction SilentlyContinue)) {
+        Write-Host "  skipped: task $Folder$Name not found"
+        return
+    }
+    Enable-ScheduledTask -TaskPath $Folder -TaskName $Name | Out-Null
+    Start-ScheduledTask -TaskPath $Folder -TaskName $Name
+}
+
+function Restore-Service {
+    param([string]$Name)
+    if (-not (Get-Service -Name $Name -ErrorAction SilentlyContinue)) {
+        Write-Host "  skipped: service $Name not found"
+        return
+    }
+    Set-Service -Name $Name -StartupType Automatic
+    Start-Service -Name $Name
 }
 
 Invoke-Step 'remove HKCU Run value airglow' {
-    Remove-ItemProperty -Path $runKey -Name 'airglow' -ErrorAction SilentlyContinue
+    if (Get-ItemProperty -Path $runKey -Name 'airglow' -ErrorAction SilentlyContinue) {
+        Remove-ItemProperty -Path $runKey -Name 'airglow'
+    }
+    else { Write-Host '  skipped: Run value airglow not present' }
 }
 Invoke-Step "stop any running Airglow.exe from $appDir" {
     $procs = @(Get-Process -Name Airglow -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path -like "$appDir\*" })
@@ -33,19 +51,14 @@ Invoke-Step "stop any running Airglow.exe from $appDir" {
 }
 Invoke-Step 'stop service Airglow (stays installed; it pauses itself while the old apps run)' {
     $service = Get-Service -Name Airglow -ErrorAction SilentlyContinue
-    if ($service -and $service.Status -ne 'Stopped') { Stop-Service -Name Airglow -Force }
+    if (-not $service) { Write-Host '  skipped: service Airglow not found'; return }
+    if ($service.Status -ne 'Stopped') { Stop-Service -Name Airglow -Force }
 }
-Invoke-Step 'set LConnectService startup type Automatic' { Set-Service -Name LConnectService -StartupType Automatic }
-Invoke-Step 'set LConnectServiceWatcher startup type Automatic' { Set-Service -Name LConnectServiceWatcher -StartupType Automatic }
-Invoke-Step 'start service LConnectService' { Start-Service -Name LConnectService }
-Invoke-Step 'start service LConnectServiceWatcher' { Start-Service -Name LConnectServiceWatcher }
-Invoke-Step 'enable and start scheduled task \LianLi\L-Connect 3' {
-    Enable-Task '\LianLi\L-Connect 3'
-    Start-ScheduledTask -TaskPath '\LianLi\' -TaskName 'L-Connect 3'
-}
-Invoke-Step 'enable and start scheduled task \FanControl' {
-    Enable-Task '\FanControl'
-    Start-ScheduledTask -TaskPath '\' -TaskName 'FanControl'
-}
+Invoke-Step 'set LConnectService to Automatic and start it' { Restore-Service 'LConnectService' }
+Invoke-Step 'set LConnectServiceWatcher to Automatic and start it' { Restore-Service 'LConnectServiceWatcher' }
+Invoke-Step 'enable and start scheduled task \LianLi\L-Connect 3' { Enable-Task '\LianLi\' 'L-Connect 3' }
+Invoke-Step 'enable and start scheduled task \FanControl' { Enable-Task '\' 'FanControl' }
 
-if (-not $Go) { Write-Host 'Dry run only. Re-run with -Go to apply.' }
+if (-not $Go) { Write-Host 'Dry run only. Re-run with -Go to apply.'; return }
+if ($script:failed -gt 0) { Write-Host "Rollback finished with $script:failed failed step(s); see WARN lines."; exit 1 }
+Write-Host 'Rollback complete.'
