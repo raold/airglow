@@ -1,0 +1,16 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <PropertyGroup>
+    <OutputName>airglow</OutputName>
+    <Platform>x64</Platform>
+    <DefineConstants>ServiceDir=$(ServiceDir);AppDir=$(AppDir);Version=$(Version)</DefineConstants>
+    <!-- WIX1149 flags every MsiServiceConfig* row. The restart actions go through util:ServiceConfig
+         (MSI 5.0's restart action fails with error 1939); only the failure-actions flag uses core ServiceConfig. -->
+    <SuppressSpecificWarnings>1149</SuppressSpecificWarnings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+</Project>

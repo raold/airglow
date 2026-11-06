@@ -1,0 +1,41 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="airglow" Manufacturer="raold" Version="$(Version)" UpgradeCode="09D9D653-3B61-446F-B4B8-A384707F27DF" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of airglow is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="airglow.ico" SourceFile="airglow.ico" />
+    <Property Id="ARPPRODUCTICON" Value="airglow.ico" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="InstallFolder" Name="Airglow">
+        <Directory Id="ServiceFolder" Name="Service" />
+        <Directory Id="AppFolder" Name="App" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main">
+      <Component Id="ServiceExe" Directory="ServiceFolder">
+        <File Id="ServiceExe" Source="$(ServiceDir)\Airglow.Service.exe" KeyPath="yes" />
+        <ServiceInstall Name="Airglow" DisplayName="airglow fan and lighting engine" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Vital="yes">
+          <ServiceConfig FailureActionsWhen="failedToStopOrReturnedError" OnInstall="yes" OnReinstall="yes" />
+          <util:ServiceConfig FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart" RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
+        </ServiceInstall>
+        <ServiceControl Id="Airglow" Name="Airglow" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      </Component>
+      <Files Directory="ServiceFolder" Include="$(ServiceDir)\**">
+        <Exclude Files="$(ServiceDir)\Airglow.Service.exe" />
+      </Files>
+
+      <Files Directory="AppFolder" Include="$(AppDir)\**" />
+
+      <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+        <Shortcut Id="StartMenuShortcut" Name="airglow" Target="[AppFolder]Airglow.exe" WorkingDirectory="AppFolder" Icon="airglow.ico" />
+        <RegistryValue Root="HKCU" Key="Software\raold\airglow" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="Autostart" Directory="AppFolder">
+        <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="airglow" Type="string" Value="&quot;[AppFolder]Airglow.exe&quot; --tray" KeyPath="yes" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>
