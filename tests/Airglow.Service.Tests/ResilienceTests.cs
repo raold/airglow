@@ -1,0 +1,173 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using Airglow.Core.Config;
+using Airglow.Core.Engine;
+using Airglow.Core.Hardware;
+using Airglow.Tests.Shared;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace Airglow.Service.Tests;
+
+public sealed class ThrowingConflicts(bool throwing) : IConflictDetector
+{
+    public volatile bool Throwing = throwing;
+
+    public IReadOnlySet<string> Running(IEnumerable<string> processNames) =>
+        Throwing ? throw new InvalidOperationException("detector broke") : new HashSet<string>();
+}
+
+public sealed class ResilienceTests : IDisposable
+{
+    private readonly string _directory = Directory.CreateTempSubdirectory("airglow-res-").FullName;
+    private readonly string _configPath;
+    private readonly FakeFactory _gpu = FakeFactory.Gpu();
+    private readonly FakeFactory _lianli = FakeFactory.LianLi();
+    private WebApplicationFactory<Program>? _factory;
+    private HttpClient? _client;
+
+    public ResilienceTests() => _configPath = Path.Combine(_directory, "config.json");
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _factory?.Dispose();
+        Directory.Delete(_directory, recursive: true);
+    }
+
+    private void SeedValid()
+    {
+        var seed = AppConfig.CreateDefault();
+        new ConfigStore(_configPath).Save(seed with { Engine = seed.Engine with { TickMilliseconds = 250 } });
+    }
+
+    private void Start(IConflictDetector conflicts)
+    {
+        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(host =>
+        {
+            host.UseEnvironment("Testing");
+            host.UseSetting("Airglow:ConfigPath", _configPath);
+            host.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IBackendFactory>();
+                services.RemoveAll<IConflictDetector>();
+                services.AddSingleton<IBackendFactory>(_gpu);
+                services.AddSingleton<IBackendFactory>(_lianli);
+                services.AddSingleton(conflicts);
+            });
+        });
+        _client = _factory.CreateClient();
+    }
+
+    private async Task<EngineState> WaitForState(Func<EngineState, bool> predicate)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (true)
+        {
+            var response = await _client!.GetAsync("/api/state");
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var state = (await response.Content.ReadFromJsonAsync<EngineState>(ConfigJson.Options))!;
+                if (predicate(state))
+                    return state;
+            }
+            Assert.True(DateTime.UtcNow < deadline, "state did not reach the expected shape within 2 s");
+            await Task.Delay(25);
+        }
+    }
+
+    [Fact]
+    public async Task Tick_failure_keeps_one_fault_and_clears_when_ticks_recover()
+    {
+        SeedValid();
+        var conflicts = new ThrowingConflicts(false);
+        Start(conflicts);
+        await WaitForState(s => s.Fans.Count == 6);
+
+        conflicts.Throwing = true;
+        var failing = await WaitForState(s => s.Faults.Any(f => f.StartsWith("Engine tick failed")));
+        Assert.Equal(6, failing.Fans.Count);
+        await Task.Delay(1000);
+
+        var later = await WaitForState(_ => true);
+        Assert.Single(later.Faults, f => f.StartsWith("Engine tick failed"));
+        Assert.Single(later.Faults);
+
+        conflicts.Throwing = false;
+        var recovered = await WaitForState(s => s.Faults.Count == 0);
+        Assert.Equal(6, recovered.Fans.Count);
+    }
+
+    [Fact]
+    public async Task First_tick_failure_publishes_a_minimal_state()
+    {
+        SeedValid();
+        var conflicts = new ThrowingConflicts(true);
+        Start(conflicts);
+
+        var state = await WaitForState(_ => true);
+
+        Assert.Empty(state.Fans);
+        Assert.Empty(state.Temperatures);
+        var fault = Assert.Single(state.Faults);
+        Assert.StartsWith("Engine tick failed", fault);
+
+        conflicts.Throwing = false;
+        await WaitForState(s => s.Fans.Count == 6 && s.Faults.Count == 0);
+    }
+
+    [Fact]
+    public async Task Config_problem_shows_as_a_fault_until_a_valid_put()
+    {
+        File.WriteAllText(_configPath, "{ this is not json");
+        Start(new FakeConflicts());
+
+        var state = await WaitForState(s => s.Fans.Count == 6);
+        Assert.Contains(state.Faults, f => f.StartsWith("config.json was unreadable"));
+
+        var config = (await _client!.GetFromJsonAsync<AppConfig>("/api/config", ConfigJson.Options))!;
+        var put = await _client!.PutAsJsonAsync("/api/config", config, ConfigJson.Options);
+        Assert.Equal(HttpStatusCode.NoContent, put.StatusCode);
+
+        await WaitForState(s => s.Faults.Count == 0);
+    }
+
+    [Fact]
+    public async Task Stopping_the_host_hands_fans_back()
+    {
+        SeedValid();
+        Start(new FakeConflicts());
+        await WaitForState(s => s.Fans.Count == 6);
+
+        _client!.Dispose();
+        _factory!.Dispose();
+
+        Assert.Contains("SetAuto()", _gpu.Backend.Fan("gpu.fan1").Calls);
+        Assert.Contains("SetAuto()", _gpu.Backend.Fan("gpu.fan2").Calls);
+        foreach (var n in Enumerable.Range(1, 4))
+            Assert.Contains("SetPercent(60)", _lianli.Backend.Fan($"lianli.g{n}").Calls);
+    }
+
+    [Fact]
+    public void Pipe_acl_denies_network_first_and_allows_system_admins_and_users()
+    {
+        var rules = PipeAcl.Create().GetAccessRules(true, false, typeof(SecurityIdentifier))
+            .Cast<AuthorizationRule>().ToList();
+
+        static SecurityIdentifier Sid(WellKnownSidType t) => new(t, null);
+        Assert.Equal(AccessControlType.Deny, ((System.IO.Pipes.PipeAccessRule)rules[0]).AccessControlType);
+        Assert.Equal(Sid(WellKnownSidType.NetworkSid), rules[0].IdentityReference);
+
+        var allowed = rules.Cast<System.IO.Pipes.PipeAccessRule>()
+            .Where(r => r.AccessControlType == AccessControlType.Allow)
+            .Select(r => r.IdentityReference).ToList();
+        Assert.Contains(Sid(WellKnownSidType.LocalSystemSid), allowed);
+        Assert.Contains(Sid(WellKnownSidType.BuiltinAdministratorsSid), allowed);
+        Assert.Contains(Sid(WellKnownSidType.AuthenticatedUserSid), allowed);
+    }
+}

@@ -9,6 +9,8 @@ public static class PipeAcl
     public static PipeSecurity Create()
     {
         var security = new PipeSecurity();
+        security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
         Allow(security, WellKnownSidType.LocalSystemSid, PipeAccessRights.FullControl);
         Allow(security, WellKnownSidType.BuiltinAdministratorsSid, PipeAccessRights.FullControl);
         Allow(security, WellKnownSidType.AuthenticatedUserSid, PipeAccessRights.ReadWrite);

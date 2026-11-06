@@ -8,8 +8,11 @@ public sealed class EngineHost(
     ConfigStore store,
     ConfigHolder holder,
     StateCache cache,
+    TimeProvider time,
     ILogger<EngineHost> log) : BackgroundService
 {
+    private EngineState? _lastGood;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -41,15 +44,24 @@ public sealed class EngineHost(
         try
         {
             var state = engine.Tick();
-            if (holder.Problem is { } problem)
-                state = state with { Faults = [.. state.Faults, problem] };
-            cache.Publish(state);
+            _lastGood = state;
+            cache.Publish(WithConfigProblem(state, null));
         }
         catch (Exception ex)
         {
             log.LogError(ex, "Engine tick failed");
-            if (cache.Current is { } previous)
-                cache.Publish(previous with { Faults = [.. previous.Faults, $"Engine tick failed: {ex.Message}"] });
+            var basis = _lastGood ?? new EngineState(time.GetUtcNow(), [], [], []);
+            cache.Publish(WithConfigProblem(basis, $"Engine tick failed: {ex.Message}"));
         }
+    }
+
+    private EngineState WithConfigProblem(EngineState state, string? tickFault)
+    {
+        var faults = state.Faults.ToList();
+        if (holder.Problem is { } problem)
+            faults.Add(problem);
+        if (tickFault is not null)
+            faults.Add(tickFault);
+        return state with { Faults = faults };
     }
 }
