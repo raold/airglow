@@ -27,6 +27,8 @@ public sealed class ConfigTests : IDisposable
         Assert.Equal(new[] { new CurvePoint(32.1, 0), new CurvePoint(73.2, 100), new CurvePoint(80.9, 100) }, gpu.Points);
         var g3 = Assert.IsType<GraphCurve>(c.Curves.Single(x => x.Id == "lianli-g3"));
         Assert.Equal(new CurvePoint(61, 59), g3.Points[4]);
+        Assert.All(c.Curves.OfType<GraphCurve>().Where(x => x.Id.StartsWith("lianli-", StringComparison.Ordinal)),
+            x => Assert.Equal("lhm/intelcpu/0/temperature/1", x.SensorId));
         var fan2 = c.Fans.Single(x => x.FanId == "gpu.fan2");
         Assert.Equal(8, fan2.StepUpPercent);
         Assert.Equal(1, fan2.StopBelowPercent);

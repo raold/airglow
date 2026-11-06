@@ -24,7 +24,7 @@ public class FanEngineTests
         _engine = NewEngine();
         _engine.ApplyConfig(_config);
         GpuCore = 52.65;
-        _gpu.Backend.Temperatures["cpu.package"] = 40;
+        _gpu.Backend.Temperatures["lhm/intelcpu/0/temperature/1"] = 40;
     }
 
     private double GpuCore { set => _gpu.Backend.Temperatures["gpu.core"] = value; }
@@ -144,7 +144,7 @@ public class FanEngineTests
     {
         _engine.Tick();
         _conflicts.RunningProcesses.Add("FanControl");
-        _gpu.Backend.Temperatures["cpu.package"] = 61;
+        _gpu.Backend.Temperatures["lhm/intelcpu/0/temperature/1"] = 61;
 
         Next();
         var state = Next();
@@ -153,7 +153,7 @@ public class FanEngineTests
         Assert.Equal(3, _gpu.Backend.Updates);
         Assert.Equal(1, _gpu.Creates);
         Assert.Equal(["SetPercent(50)"], Fan("gpu.fan1").Calls);
-        Assert.Contains(state.Temperatures, t => t.Id == "cpu.package" && t.Celsius == 61);
+        Assert.Contains(state.Temperatures, t => t.Id == "lhm/intelcpu/0/temperature/1" && t.Celsius == 61);
         Assert.Equal("SetPercent(74)", Fan("lianli.g1").Calls[^1]);
     }
 
@@ -653,7 +653,7 @@ public class FanEngineTests
     public void Sensor_missing_for_30s_reopens_sensor_backends_at_most_once_a_minute()
     {
         _engine.Tick();
-        _gpu.Backend.Temperatures.Remove("cpu.package");
+        _gpu.Backend.Temperatures.Remove("lhm/intelcpu/0/temperature/1");
 
         for (var second = 1; second <= 30; second++)
             Next();

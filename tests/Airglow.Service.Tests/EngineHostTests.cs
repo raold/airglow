@@ -34,7 +34,7 @@ public sealed class EngineHostTests : IDisposable
     public EngineHostTests()
     {
         _gpu.Backend.Temperatures["gpu.core"] = 52.65;
-        _gpu.Backend.Temperatures["cpu.package"] = 40;
+        _gpu.Backend.Temperatures["lhm/intelcpu/0/temperature/1"] = 40;
         _engine = new FanEngine([_gpu, _lianli], _conflicts, _time, NullLogger<FanEngine>.Instance);
         var store = new ConfigStore(Path.Combine(_directory, "config.json"));
         _host = new EngineHost(_engine, store, new ConfigHolder(), _cache, _time, _log);

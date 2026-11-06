@@ -107,7 +107,7 @@ public sealed class FakeFactory(FakeBackend backend, params string[] conflicting
         new FakeBackend(
             "Sensors and GPU",
             [new("gpu.fan1", "GPU fan 1", supportsAuto: true), new("gpu.fan2", "GPU fan 2", supportsAuto: true)],
-            [new("gpu.core", "GPU Core", "GPU"), new("cpu.package", "CPU Package", "CPU")]),
+            [new("gpu.core", "GPU Core", "GPU"), new("lhm/intelcpu/0/temperature/1", "CPU Core Average", "CPU")]),
         "FanControl");
 
     public static FakeFactory LianLi() => new(

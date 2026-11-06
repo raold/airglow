@@ -39,13 +39,13 @@ public sealed record AppConfig(
         var curves = new List<FanCurve>
         {
             new GraphCurve("gpu", "4090", "gpu.core", Pts((32.1, 0), (73.2, 100), (80.9, 100)), hysteresis),
-            new GraphCurve("lianli-g1", "Group 1", "cpu.package",
+            new GraphCurve("lianli-g1", "Group 1", "lhm/intelcpu/0/temperature/1",
                 Pts((0, 10), (25, 45), (34, 52), (48, 57), (61, 74), (71, 98), (100, 100)), hysteresis),
-            new GraphCurve("lianli-g2", "Group 2", "cpu.package",
+            new GraphCurve("lianli-g2", "Group 2", "lhm/intelcpu/0/temperature/1",
                 Pts((0, 10), (25, 45), (35, 55), (49, 68), (61, 77), (78, 93), (100, 100)), hysteresis),
-            new GraphCurve("lianli-g3", "Group 3", "cpu.package",
+            new GraphCurve("lianli-g3", "Group 3", "lhm/intelcpu/0/temperature/1",
                 Pts((0, 10), (25, 45), (35, 59), (49, 59), (61, 59), (78, 93), (100, 100)), hysteresis),
-            new GraphCurve("lianli-g4", "Group 4", "cpu.package",
+            new GraphCurve("lianli-g4", "Group 4", "lhm/intelcpu/0/temperature/1",
                 Pts((0, 10), (25, 45), (35, 55), (49, 68), (61, 77), (78, 93), (100, 100)), hysteresis),
         };
 
